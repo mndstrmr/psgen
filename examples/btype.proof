@@ -1,0 +1,30 @@
+lemma btype
+    state btype_progress (`IDEX_IS_BTYPE && instr_will_progress)
+    state btype_fin (`WBEXC_ISS_BTYPE && finishing_executed)
+
+    graph_induction +rev
+        cond (`IDEX_IS_BTYPE & `CR.instr_valid_id & ~ex_err & ~ex_kill)
+
+        inv nobranch (~ex_has_branched_d)
+        inv match (ex_has_branched_d == `CR.branch_decision)
+
+        entry (`CR.instr_new_id) -> stall progress outstanding
+
+        node stall nobranch (`ID.stall_ld_hz) => stall progress
+        node outstanding match (`IDG.outstanding_memory_access) => outstanding progress
+            split
+                case (ex_has_branched_d)
+                case (~ex_has_branched_d)
+        node progress match btype_progress
+
+    in btype_progress
+        have (~`CR.branch_decision |-> spec_post_pc == pre_nextpc)
+        have (`CR.branch_decision |-> spec_post_pc == post_pc)
+
+    in btype_fin
+        use fast_structure
+
+    /
+
+    in btype_fin
+        use standard_instr

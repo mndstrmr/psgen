@@ -1,0 +1,18 @@
+lemma load
+    cond (ex_pres_load_instr)
+    state req (data_req_o)
+    state fst_req (mem_req_fst_d)
+    state snd_req (mem_req_snd_d)
+
+    noerr
+    /
+    in req
+        have (~data_we_o)
+        have (spec_mem_read)
+    in fst_req
+        have (spec_mem_read_fst_addr == data_addr_o)
+    in snd_req
+        have (spec_mem_read_snd)
+        have (spec_mem_read_snd_addr == data_addr_o)
+    /
+    standard_instr
