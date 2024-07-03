@@ -320,13 +320,20 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 		return statesActive[3:]
 	}
 
-	// Base cases: if we have entry nodes, we check that the entry condition implies one of the entry nodes are active
 	if len(cmd.entryNodes) > 0 {
+		// Base cases:
+		// Check that the entry condition implies one of the entry nodes are active
 		group.appendProp(NewPropertyFrom("initial", "("+cmd.entryCondition+") |-> ("+unionNodeConds(cmd.entryNodes)+")"))
+
+		// Check that whichever entry node we are in, that node's invariant is satisfied
+		for _, node := range cmd.entryNodes {
+			group.appendProp(NewPropertyFrom("initial_"+node, "("+cmd.entryCondition+") & ("+cmd.findNode(node).condition.getString(scope)+") |-> ("+cmd.invariants[cmd.findNode(node).invariant]+")"))
+		}
 	}
 
 	// Inductive steps:
 	for _, node := range cmd.nodes {
+		// If there are no next nodes we are allowed to leave the graph
 		if len(node.nextNodes) == 0 {
 			continue
 		}
