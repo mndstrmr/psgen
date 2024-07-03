@@ -1,12 +1,16 @@
 def fast_structure
-    . ($past(instr_will_progress))
+    have ($past(instr_will_progress))
 
 def standard_instr
-    . (no_unreach)
-    . (addr_match)
-    . (csrs_match)
-    . (pc_match)
-    . (data_match)
+    cond (finishing_executed)
+    unreach: have (no_unreach)
+    have (addr_match)
+    have (csrs_match)
+    have (pc_match)
+    have (data_match)
+
+lemma something
+  have (x)
 
 lemma btype
     state btype_progress (`IDEX_IS_BTYPE && instr_will_progress)
@@ -22,15 +26,14 @@ lemma btype
 
         node stall nobranch (`ID.stall_ld_hz) => stall progress
         node outstanding match (`IDG.outstanding_memory_access) => outstanding progress
-            split
-                case (ex_has_branched_d)
-                case (~ex_has_branched_d)
+            split_bool (ex_has_branched_d)
         node progress match btype_progress
 
     in btype_fin
         use fast_structure
 
     /
+    lemma something
 
     in btype_progress
         have (~`CR.branch_decision |-> spec_post_pc == pre_nextpc)

@@ -6,8 +6,21 @@ import (
 )
 
 type Scope struct {
-	stack []*LocalScope
-	defs  map[string][]string
+	lemmas map[string]Lemma
+	stack  []*LocalScope
+	defs   map[string]SequencedProofSteps
+}
+
+func (scope *Scope) cloneRoot() Scope {
+	v := Scope{
+		lemmas: map[string]Lemma{},
+		stack:  []*LocalScope{},
+		defs:   map[string]SequencedProofSteps{},
+	}
+	for k, lemma := range scope.lemmas {
+		v.lemmas[k] = lemma
+	}
+	return v
 }
 
 func (scope *Scope) push(local *LocalScope) {
@@ -32,6 +45,7 @@ func (scope *Scope) getState(name string) string {
 }
 
 type Provable interface {
+	prefix(string)
 	condition(string)
 	copy() Provable
 	flatten(*FlatProofSequence, int) int
@@ -49,12 +63,22 @@ func (seq *FlatProofSequence) addTo(n int, prop *Property) {
 }
 
 type Property struct {
+	name            string
 	revImplications []string
 }
 
-func NewPropertyFrom(statement string) Property {
+func NewPropertyFrom(name string, statement string) Property {
 	return Property{
+		name:            name,
 		revImplications: []string{statement},
+	}
+}
+
+func (prop *Property) prefix(prefix string) {
+	if prop.name == "" {
+		prop.name = prefix
+	} else {
+		prop.name = prefix + "_" + prop.name
 	}
 }
 
@@ -64,6 +88,7 @@ func (prop *Property) condition(cond string) {
 
 func (prop *Property) copy() Provable {
 	return &Property{
+		name:            prop.name,
 		revImplications: slices.Clone(prop.revImplications),
 	}
 }
@@ -86,6 +111,12 @@ func NewProvableGroup() ProvableGroup {
 
 func (group *ProvableGroup) appendProp(prop Property) {
 	group.props = append(group.props, &prop)
+}
+
+func (group *ProvableGroup) prefix(prefix string) {
+	for _, step := range group.props {
+		step.prefix(prefix)
+	}
 }
 
 func (group *ProvableGroup) append(prop Provable) {
@@ -125,6 +156,12 @@ func (group *ProvableGroup) copy() Provable {
 // An ordered sequence of properties
 type ProvableSeq struct {
 	seq []Provable
+}
+
+func (seq *ProvableSeq) prefix(prefix string) {
+	for _, step := range seq.seq {
+		step.prefix(prefix)
+	}
 }
 
 func (seq *ProvableSeq) append(prop Provable) {
@@ -188,46 +225,87 @@ func (cmd *SplitProofHelper) helpProperty(scope *Scope, prop Provable) Provable 
 
 	for _, cas := range cmd.cases {
 		new := prop.copy()
-		new.condition(cas.condition)
+		new.condition(cas.condition.getString(scope))
 		group.append(cas.helper.helpProperty(scope, new))
+	}
+
+	return &ProvableSeq{
+		seq: []Provable{&group, prop},
+	}
+}
+
+func (cmd *SplitBoolProofHelper) helpProperty(scope *Scope, prop Provable) Provable {
+	group := ProvableGroup{
+		props: make([]Provable, 0),
+	}
+
+	if len(cmd.pivots) > 16 {
+		panic("to many pivots")
+	}
+
+	i := 0
+	for i < 1<<len(cmd.pivots) {
+		new := prop.copy()
+
+		for j, pivot := range cmd.pivots {
+			if i&(1<<j) != 0 {
+				new.condition(pivot.getString(scope))
+			} else {
+				new.condition("~(" + pivot.getString(scope) + ")")
+			}
+		}
+
+		group.append(new)
+
+		i += 1
 	}
 
 	return &group
 }
 
-func (cmd *HaveProofCommand) genProperty(scope *Scope) Provable {
-	return cmd.helper.helpProperty(scope, &Property{
-		revImplications: []string{cmd.condition},
-	})
+func (cmd *LemmaProofCommand) genProperty(scope *Scope) Provable {
+	lemma, ok := scope.lemmas[cmd.name]
+	if !ok {
+		panic(fmt.Errorf("lemma does not exist: %s", cmd.name))
+	}
+	fresh := scope.cloneRoot()
+	return lemma.genProperty(&fresh)
 }
 
-func (cmd *InStateSubProofCommand) genProperty(scope *Scope) Provable {
+func (cmd *BlockProofCommand) genProperty(scope *Scope) Provable {
 	prop := cmd.seq.genProperty(scope)
-	prop.condition(scope.getState(cmd.state))
+	if cmd.label != "" {
+		prop.prefix(cmd.label)
+	}
 	return prop
 }
 
+func (cmd *HaveProofCommand) genProperty(scope *Scope) Provable {
+	prop := NewPropertyFrom(cmd.label, cmd.condition)
+	return cmd.helper.helpProperty(scope, &prop)
+}
+
+func (cmd *InStatesSubProofCommand) genProperty(scope *Scope) Provable {
+	group := NewProvableGroup()
+	prop := cmd.seq.genProperty(scope)
+	for _, cond := range cmd.states {
+		copy := prop.copy()
+		copy.condition(cond.getString(scope))
+		group.append(copy)
+	}
+	if cmd.label != "" {
+		group.prefix(cmd.label)
+	}
+	return &group
+}
+
 func (cmd *UseProofCommand) genProperty(scope *Scope) Provable {
-	prop_strs, ok := scope.defs[cmd.name]
+	prop_seq, ok := scope.defs[cmd.name]
 	if !ok {
 		panic(fmt.Errorf("undefined def %s", cmd.name))
 	}
 
-	if len(prop_strs) == 1 {
-		return cmd.helper.helpProperty(scope, &Property{
-			revImplications: []string{prop_strs[0]},
-		})
-	}
-
-	group := ProvableGroup{
-		props: make([]Provable, len(prop_strs)),
-	}
-	for i, prop_str := range prop_strs {
-		group.props[i] = &Property{
-			revImplications: []string{prop_str},
-		}
-	}
-	return cmd.helper.helpProperty(scope, &group)
+	return cmd.helper.helpProperty(scope, prop_seq.genProperty(scope))
 }
 
 func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
@@ -244,7 +322,7 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 
 	// Base cases: if we have entry nodes, we check that the entry condition implies one of the entry nodes are active
 	if len(cmd.entryNodes) > 0 {
-		group.appendProp(NewPropertyFrom("(" + cmd.entryCondition + ") |-> (" + unionNodeConds(cmd.entryNodes) + ")"))
+		group.appendProp(NewPropertyFrom("initial", "("+cmd.entryCondition+") |-> ("+unionNodeConds(cmd.entryNodes)+")"))
 	}
 
 	// Inductive steps:
@@ -255,17 +333,39 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 
 		sub_group := NewProvableGroup()
 		// The condition for one of my outgoing nodes is met in the next cycle
-		sub_group.appendProp(NewPropertyFrom("(" + node.condition.getString(scope) + ") |=> (" + unionNodeConds(node.nextNodes) + ")"))
+		sub_group.appendProp(NewPropertyFrom(node.name+"_step", "("+node.condition.getString(scope)+") |=> ("+unionNodeConds(node.nextNodes)+")"))
 
 		for _, dst := range node.nextNodes {
 			// If last cycle I was active and this cycle you are active, then my invariant being true last cycle implies your invariant is true this cycle
-			sub_group.appendProp(NewPropertyFrom("$past(" + node.condition.getString(scope) + ") && (" + cmd.findNode(dst).condition.getString(scope) + ") && $past(" + cmd.invariants[node.invariant] + ") |-> (" + cmd.invariants[cmd.findNode(dst).invariant] + ")"))
+			sub_group.appendProp(NewPropertyFrom(node.name+"_"+dst+"_inv", "$past("+node.condition.getString(scope)+") && ("+cmd.findNode(dst).condition.getString(scope)+") && $past("+cmd.invariants[node.invariant]+") |-> ("+cmd.invariants[cmd.findNode(dst).invariant]+")"))
 		}
+
+		if cmd.backward {
+			// Reverse inductive step path
+			reverseNodes := []string{}
+			for _, other := range cmd.nodes {
+				if !slices.Contains(other.nextNodes, node.name) {
+					reverseNodes = append(reverseNodes, other.name)
+				}
+			}
+			backwardStr := unionNodeConds(reverseNodes)
+
+			entryCarvout := ""
+			if slices.Contains(cmd.entryNodes, node.name) {
+				entryCarvout += " | (" + cmd.entryCondition + ")"
+			}
+
+			sub_group.appendProp(NewPropertyFrom(node.name+"_rev", "("+node.condition.getString(scope)+") |-> $past("+backwardStr+")"+entryCarvout))
+		}
+
 		group.append(node.helper.helpProperty(scope, &sub_group))
 	}
 
 	scope.pop()
 	cmd.scope.applyScopeConds(&group)
+	if cmd.label != "" {
+		group.prefix(cmd.label)
+	}
 	return &group
 }
 
@@ -274,6 +374,7 @@ func (cmd *GraphInductionProofCommand) genProperty(scope *Scope) Provable {
 }
 
 func (seq *SequencedProofSteps) genProperty(scope *Scope) Provable {
+	scope.push(&seq.scope)
 	prop := ProvableSeq{
 		seq: make([]Provable, 0),
 	}
@@ -297,6 +398,8 @@ func (seq *SequencedProofSteps) genProperty(scope *Scope) Provable {
 		prop.append(&group)
 	}
 
+	scope.pop()
+	seq.scope.applyScopeConds(&prop)
 	return &prop
 }
 
@@ -307,9 +410,5 @@ func (scope *LocalScope) applyScopeConds(prop Provable) {
 }
 
 func (lemma *Lemma) genProperty(scope *Scope) Provable {
-	scope.push(&lemma.seq.scope)
-	prop := lemma.seq.genProperty(scope)
-	lemma.seq.scope.applyScopeConds(prop)
-	scope.pop()
-	return prop
+	return lemma.seq.genProperty(scope)
 }

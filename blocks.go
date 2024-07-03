@@ -49,6 +49,7 @@ const (
 )
 
 type Command struct {
+	label        string
 	operator     string
 	flags        []string
 	inlineArgs   []CommandArg
@@ -121,7 +122,15 @@ func (cmd *Command) fixArgs(n int) {
 }
 
 func parseCommand(str string) Command {
-	operatorRest := strings.SplitN(str, " ", 2)
+	labelRest := strings.SplitN(str, ":", 2)
+	label := ""
+	var operatorRest []string
+	if len(labelRest) > 1 && !strings.Contains(labelRest[0], " ") {
+		label = labelRest[0]
+		operatorRest = strings.SplitN(strings.Trim(labelRest[1], " \t"), " ", 2)
+	} else {
+		operatorRest = strings.SplitN(str, " ", 2)
+	}
 
 	inlineArgs := make([]CommandArg, 0)
 	flags := make([]string, 0)
@@ -179,6 +188,7 @@ func parseCommand(str string) Command {
 	}
 
 	return Command{
+		label:        label,
 		operator:     operatorRest[0],
 		inlineArgs:   inlineArgs,
 		flags:        flags,
@@ -195,15 +205,16 @@ type Block struct {
 func lineDepth(line string) int {
 	for c, chr := range line {
 		if chr != ' ' {
-			return c / 4
+			return c
 		}
 	}
-	return -1
+	panic("unreachable")
 }
 
-func parseBlocks(lines []string, depth int) (int, []Block) {
+func parseBlocks(lines []string, parentDepth int) (int, []Block) {
 	blocks := make([]Block, 0)
 	l := 0
+	nestedDepth := -1
 	for l < len(lines) {
 		line := lines[l]
 
@@ -213,18 +224,35 @@ func parseBlocks(lines []string, depth int) (int, []Block) {
 		}
 
 		lineDepth := lineDepth(line)
-		if lineDepth < depth {
+		if lineDepth > parentDepth && nestedDepth == -1 {
+			nestedDepth = lineDepth
+		}
+
+		if lineDepth <= parentDepth {
 			return l, blocks
 		}
 
-		if lineDepth > depth {
+		if lineDepth > nestedDepth {
 			panic(fmt.Errorf("unexpected indent"))
 		}
 
-		incL, body := parseBlocks(lines[l+1:], depth+1)
+		commandStr := strings.Trim(line, " \t")
+		for l < len(lines) {
+			if strings.HasSuffix(commandStr, "\\") {
+				l += 1
+				commandStr = commandStr[:len(commandStr)-1] + strings.Trim(lines[l], " \t")
+			} else if strings.HasSuffix(commandStr, ":") {
+				l += 1
+				commandStr = commandStr + strings.Trim(lines[l], " \t")
+			} else {
+				break
+			}
+		}
+
+		incL, body := parseBlocks(lines[l+1:], nestedDepth)
 
 		blocks = append(blocks, Block{
-			first: parseCommand(strings.Trim(line, " \t")),
+			first: parseCommand(commandStr),
 			body:  body,
 		})
 

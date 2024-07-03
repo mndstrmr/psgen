@@ -7,46 +7,72 @@ import (
 	"strings"
 )
 
-var path string
+var paths []string
+var rootLemma string
+var svOut string
+var tclOut string
+var slice int
 
 func main() {
-	flag.StringVar(&path, "path", "", "path to root proof structure")
+	paths = []string{}
+	flag.Func("path", "paths to source files", func(s string) error {
+		paths = append(paths, s)
+		return nil
+	})
+	flag.StringVar(&rootLemma, "root", "", "name of root lemma")
+	flag.IntVar(&slice, "slice", -1, "select a slice to assert, those leading up to it will be assumed and those after ignored")
+	flag.StringVar(&svOut, "sv-out", "out.sv", "path to write generated SystemVerilog to")
+	flag.StringVar(&tclOut, "tcl-out", "", "path to write generated TCL to, or empty to ignore")
 	flag.Parse()
 
-	if path == "" {
-		fmt.Println(fmt.Errorf("error: must specify a path"))
+	if len(paths) == 0 {
+		fmt.Println(fmt.Errorf("error: must specify at least one path"))
 		return
 	}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Println(err)
+	if rootLemma == "" {
+		fmt.Println(fmt.Errorf("error: must specify a root lemma"))
 		return
 	}
-
-	str := strings.Split(string(data), "\n")
-	_, blocks := parseBlocks(str, 0)
-	structure := blocksToProofDocument(blocks)
-
-	tcl := "proof_structure -init root -copy_asserts -copy_assumes\n"
-	sva := ""
 
 	scope := Scope{
-		stack: make([]*LocalScope, 0),
-		defs:  structure.defs,
+		lemmas: map[string]Lemma{},
+		stack:  make([]*LocalScope, 0),
+		defs:   map[string]SequencedProofSteps{},
 	}
 
-	for _, lemma := range structure.lemmas {
-		prop := lemma.genProperty(&scope)
-		seq := FlatProofSequence{
-			props: make([][]*Property, 0),
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Println(err)
+			return
 		}
-		prop.flatten(&seq, 0)
-		new_tcl, new_sva := seq.toTclSva()
-		tcl += new_tcl
-		sva += new_sva
+
+		str := strings.Split(string(data), "\n")
+		_, blocks := parseBlocks(str, -1)
+		structure := blocksToProofDocument(blocks)
+
+		for k, v := range structure.lemmas {
+			scope.lemmas[k] = v
+		}
+		for k, v := range structure.defs {
+			scope.defs[k] = v
+		}
 	}
 
-	os.WriteFile("out.tcl", []byte(tcl), 0664)
+	lemma, ok := scope.lemmas[rootLemma]
+	if !ok {
+		panic(fmt.Errorf("root lemma %s does not exist", rootLemma))
+	}
+	prop := lemma.genProperty(&scope)
+	seq := FlatProofSequence{
+		props: make([][]*Property, 0),
+	}
+	prop.flatten(&seq, 0)
+	tcl, sva := seq.toTclSva(slice)
+
+	if tclOut != "" {
+		os.WriteFile("out.tcl", []byte("proof_structure -init root -copy_asserts -copy_assumes\n"+tcl), 0664)
+	}
 	os.WriteFile("out.sv", []byte(sva), 0664)
 }

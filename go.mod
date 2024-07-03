@@ -1,3 +1,3 @@
-module example.com/m
+module example.com/psgen
 
 go 1.22.1

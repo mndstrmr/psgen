@@ -26,12 +26,23 @@ type ProofCommand interface {
 	GenProperty
 }
 
-type InStateSubProofCommand struct {
-	state string
+type InStatesSubProofCommand struct {
+	label  string
+	states []VerbatimOrState
+	seq    SequencedProofSteps
+}
+
+type LemmaProofCommand struct {
+	name string
+}
+
+type BlockProofCommand struct {
+	label string
 	seq   SequencedProofSteps
 }
 
 type HaveProofCommand struct {
+	label     string
 	condition string
 	helper    ProofHelper
 }
@@ -48,12 +59,16 @@ type ProofHelper interface {
 type NullProofHelpher struct{}
 
 type SplitProofCase struct {
-	condition string
+	condition VerbatimOrState
 	helper    ProofHelper
 }
 
 type SplitProofHelper struct {
 	cases []SplitProofCase
+}
+
+type SplitBoolProofHelper struct {
+	pivots []VerbatimOrState
 }
 
 type GraphInductionNodeDefinition struct {
@@ -65,6 +80,7 @@ type GraphInductionNodeDefinition struct {
 }
 
 type GraphInductionProofHelper struct {
+	label          string
 	backward       bool
 	invariants     map[string]string
 	entryCondition string
@@ -97,8 +113,8 @@ type Lemma struct {
 }
 
 type ProofDocument struct {
-	defs   map[string][]string
-	lemmas []Lemma
+	defs   map[string]SequencedProofSteps
+	lemmas map[string]Lemma
 }
 
 func blocksToProofHelper(blocks []Block) ProofHelper {
@@ -111,19 +127,33 @@ func blocksToProofHelper(blocks []Block) ProofHelper {
 	}
 
 	switch blocks[0].first.operator {
+	case "split_bool":
+		pivots := make([]VerbatimOrState, 0)
+		for _, arg := range blocks[0].first.inlineArgs {
+			pivots = append(pivots, arg.toVerbatimOrState())
+		}
+		return &SplitBoolProofHelper{
+			pivots,
+		}
 	case "split":
-		blocks[0].first.fixArgs(0)
+		cases := make([]SplitProofCase, 0)
 
-		cases := make([]SplitProofCase, len(blocks[0].body))
-		for b, block := range blocks[0].body {
+		for _, arg := range blocks[0].first.inlineArgs {
+			cases = append(cases, SplitProofCase{
+				condition: arg.toVerbatimOrState(),
+				helper:    &NullProofHelpher{},
+			})
+		}
+
+		for _, block := range blocks[0].body {
 			if block.first.operator != "case" {
 				panic("non case command in split")
 			}
 			block.first.fixArgs(1)
-			cases[b] = SplitProofCase{
-				condition: block.first.verbatimArg(0),
+			cases = append(cases, SplitProofCase{
+				condition: block.first.verbatimOrStateArg(0),
 				helper:    blocksToProofHelper(block.body),
-			}
+			})
 		}
 
 		return &SplitProofHelper{
@@ -140,6 +170,7 @@ func blocksToProofHelper(blocks []Block) ProofHelper {
 
 func blocksToGraphInduction(root Block) GraphInductionProofHelper {
 	cmd := GraphInductionProofHelper{
+		label:          root.first.label,
 		backward:       root.first.hasFlag("rev"),
 		invariants:     make(map[string]string, 0),
 		entryCondition: "",
@@ -205,15 +236,30 @@ func blocksToSequenceProof(blocks []Block) SequencedProofSteps {
 
 func blockToProofCommand(block Block, scope *LocalScope) ProofCommand {
 	switch block.first.operator {
-	case "in":
-		block.first.fixArgs(1)
-		return &InStateSubProofCommand{
-			state: block.first.wordArg(0),
+	case "block":
+		return &BlockProofCommand{
+			label: block.first.label,
 			seq:   blocksToSequenceProof(block.body),
+		}
+	case "in":
+		states := []VerbatimOrState{}
+		for _, arg := range block.first.inlineArgs {
+			states = append(states, arg.toVerbatimOrState())
+		}
+		return &InStatesSubProofCommand{
+			label:  block.first.label,
+			states: states,
+			seq:    blocksToSequenceProof(block.body),
+		}
+	case "lemma":
+		block.first.fixArgs(1)
+		return &LemmaProofCommand{
+			name: block.first.wordArg(0),
 		}
 	case "have":
 		block.first.fixArgs(1)
 		return &HaveProofCommand{
+			label:     block.first.label,
 			condition: block.first.verbatimArg(0),
 			helper:    blocksToProofHelper(block.body),
 		}
@@ -242,30 +288,21 @@ func blockToProofCommand(block Block, scope *LocalScope) ProofCommand {
 }
 
 func blocksToProofDocument(blocks []Block) ProofDocument {
-	lemmas := make([]Lemma, 0)
-	defs := make(map[string][]string, 0)
+	lemmas := make(map[string]Lemma, 0)
+	defs := make(map[string]SequencedProofSteps, 0)
 
 	for _, block := range blocks {
 		switch block.first.operator {
 		case "lemma":
 			block.first.fixArgs(1)
-			lemmas = append(lemmas, Lemma{
-				name: block.first.wordArg(0),
+			name := block.first.wordArg(0)
+			lemmas[name] = Lemma{
+				name: name,
 				seq:  blocksToSequenceProof(block.body),
-			})
+			}
 		case "def":
 			block.first.fixArgs(1)
-
-			props := make([]string, 0)
-			for _, block := range block.body {
-				if block.first.operator != "." {
-					panic(fmt.Errorf("expected . in def"))
-				}
-				block.first.fixArgs(1)
-				props = append(props, block.first.verbatimArg(0))
-			}
-
-			defs[block.first.wordArg(0)] = props
+			defs[block.first.wordArg(0)] = blocksToSequenceProof(block.body)
 		default:
 			panic(fmt.Errorf("bad first operator: %s", block.first.operator))
 		}
