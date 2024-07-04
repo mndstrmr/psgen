@@ -69,6 +69,7 @@ type SplitProofHelper struct {
 
 type SplitBoolProofHelper struct {
 	pivots []VerbatimOrState
+	helper ProofHelper
 }
 
 type GraphInductionNodeDefinition struct {
@@ -123,7 +124,7 @@ func blocksToProofHelper(blocks []Block) ProofHelper {
 	}
 
 	if len(blocks) > 1 {
-		panic("multi step proof helper")
+		panic("multi step proof helper not supported")
 	}
 
 	switch blocks[0].first.operator {
@@ -133,7 +134,8 @@ func blocksToProofHelper(blocks []Block) ProofHelper {
 			pivots = append(pivots, arg.toVerbatimOrState())
 		}
 		return &SplitBoolProofHelper{
-			pivots,
+			pivots: pivots,
+			helper: blocksToProofHelper(blocks[0].body),
 		}
 	case "split":
 		cases := make([]SplitProofCase, 0)

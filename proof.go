@@ -242,9 +242,7 @@ func (cmd *SplitProofHelper) helpProperty(scope *Scope, prop Provable) Provable 
 }
 
 func (cmd *SplitBoolProofHelper) helpProperty(scope *Scope, prop Provable) Provable {
-	group := ProvableGroup{
-		props: make([]Provable, 0),
-	}
+	group := NewProvableGroup()
 
 	if len(cmd.pivots) > 16 {
 		panic("too many pivots")
@@ -267,7 +265,7 @@ func (cmd *SplitBoolProofHelper) helpProperty(scope *Scope, prop Provable) Prova
 		i += 1
 	}
 
-	return &group
+	return cmd.helper.helpProperty(scope, &group)
 }
 
 func (cmd *LemmaProofCommand) genProperty(scope *Scope) Provable {
