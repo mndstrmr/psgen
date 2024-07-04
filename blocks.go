@@ -11,7 +11,8 @@ type CommandArg interface {
 }
 
 type WordArg struct {
-	word string
+	label string
+	word  string
 }
 
 func (self *WordArg) toString() string {
@@ -20,12 +21,14 @@ func (self *WordArg) toString() string {
 
 func (self *WordArg) toVerbatimOrState() VerbatimOrState {
 	return VerbatimOrState{
+		label:    self.label,
 		str:      self.word,
 		verbatim: false,
 	}
 }
 
 type VerbatimCommandArg struct {
+	label   string
 	content string
 }
 
@@ -35,6 +38,7 @@ func (self *VerbatimCommandArg) toString() string {
 
 func (self *VerbatimCommandArg) toVerbatimOrState() VerbatimOrState {
 	return VerbatimOrState{
+		label:    self.label,
 		str:      self.content,
 		verbatim: true,
 	}
@@ -121,15 +125,58 @@ func (cmd *Command) fixArgs(n int) {
 	}
 }
 
-func parseCommand(str string) Command {
+func parseLabel(str string) (string, string) {
 	labelRest := strings.SplitN(str, ":", 2)
-	label := ""
-	var operatorRest []string
 	if len(labelRest) > 1 && !strings.Contains(labelRest[0], " ") {
-		label = labelRest[0]
-		operatorRest = strings.SplitN(strings.Trim(labelRest[1], " \t"), " ", 2)
+		return labelRest[0], strings.Trim(labelRest[1], " \t")
 	} else {
-		operatorRest = strings.SplitN(str, " ", 2)
+		return "", str
+	}
+}
+
+func parseArg(str string) (string, CommandArg) {
+	label, rest := parseLabel(str)
+	str = rest
+
+	if len(str) > 0 && str[0] == '(' {
+		i := 1
+		start := i
+		depth := 1
+		for i < len(str) && (str[i] != ')' || depth > 1) {
+			if str[i] == '(' {
+				depth += 1
+			} else if str[i] == ')' {
+				depth -= 1
+			}
+			i += 1
+		}
+		if depth != 1 || str[i] != ')' {
+			panic(fmt.Errorf("unclosed verbatim"))
+		}
+		return str[i+1:], &VerbatimCommandArg{
+			label:   label,
+			content: str[start:i],
+		}
+	}
+
+	i := 0
+	for i < len(str) && str[i] != ' ' {
+		i += 1
+	}
+	return str[i:], &WordArg{
+		label: label,
+		word:  str[:i],
+	}
+}
+
+func parseCommand(str string) Command {
+	label, rest := parseLabel(str)
+	operatorRest := strings.SplitN(rest, " ", 2)
+
+	if len(operatorRest) > 1 {
+		str = operatorRest[1]
+	} else {
+		str = ""
 	}
 
 	inlineArgs := make([]CommandArg, 0)
@@ -137,53 +184,32 @@ func parseCommand(str string) Command {
 	trailing := ""
 	trailingMode := TRAILING_NONE
 	i := 0
-	for len(operatorRest) > 1 && i < len(operatorRest[1]) {
-		if operatorRest[1][i] == ' ' {
+	for i < len(str) {
+		if str[i] == ' ' {
 			i += 1
 			continue
 		}
 
-		if operatorRest[1][i] == '(' {
-			i += 1
-			start := i
-			depth := 1
-			for i < len(operatorRest[1]) && (operatorRest[1][i] != ')' || depth > 1) {
-				if operatorRest[1][i] == '(' {
-					depth += 1
-				} else if operatorRest[1][i] == ')' {
-					depth -= 1
-				}
-				i += 1
-			}
-			if depth != 1 || operatorRest[1][i] != ')' {
-				panic(fmt.Errorf("unclosed verbatim"))
-			}
-			inlineArgs = append(inlineArgs, &VerbatimCommandArg{
-				content: operatorRest[1][start:i],
-			})
-
-			i += 1 // Closing ')'
-		} else if strings.HasPrefix(operatorRest[1][i:], "=>") {
-			trailing = strings.Trim(operatorRest[1][i+2:], " \t")
+		if strings.HasPrefix(str[i:], "=>") {
+			trailing = strings.Trim(str[i+2:], " \t")
 			trailingMode = TRAILING_STEP
 			break
-		} else if strings.HasPrefix(operatorRest[1][i:], "->") {
-			trailing = strings.Trim(operatorRest[1][i+2:], " \t")
+		} else if strings.HasPrefix(str[i:], "->") {
+			trailing = strings.Trim(str[i+2:], " \t")
 			trailingMode = TRAILING_NOW
 			break
-		} else {
+		} else if strings.HasPrefix(str[i:], "+") {
+			i += 1
 			start := i
-			for i < len(operatorRest[1]) && operatorRest[1][i] != ' ' {
+			for i < len(str) && str[i] != ' ' {
 				i += 1
 			}
-			word := operatorRest[1][start:i]
-			if strings.HasPrefix(word, "+") {
-				flags = append(flags, word[1:])
-			} else {
-				inlineArgs = append(inlineArgs, &WordArg{
-					word: word,
-				})
-			}
+			flags = append(flags, str[start:i])
+		} else {
+			newStr, arg := parseArg(str[i:])
+			str = newStr
+			inlineArgs = append(inlineArgs, arg)
+			i = 0
 		}
 	}
 

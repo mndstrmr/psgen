@@ -7,6 +7,14 @@ import (
 	"strings"
 )
 
+func camelCase(str string) string {
+	out := ""
+	for _, word := range strings.Split(str, "_") {
+		out += strings.ToUpper(string(word[0])) + word[1:]
+	}
+	return out
+}
+
 func isParenthesised(str string) bool {
 	if len(str) == 0 {
 		return false
@@ -51,10 +59,13 @@ func isUnary(str string) bool {
 
 func conjoin(terms []string) string {
 	re := regexp.MustCompile("^[a-z`A-Z0-9_& ~.]*$")
-	new := []string{}
-	for _, term := range terms {
+	new := ""
+	for i, term := range terms {
+		if i != 0 {
+			new += " & "
+		}
 		if re.MatchString(term) || isUnary(term) {
-			new = append(new, term)
+			new += term
 			continue
 		}
 
@@ -68,12 +79,12 @@ func conjoin(terms []string) string {
 		}
 
 		if allSubtermsUnary {
-			new = append(new, term)
+			new += term
 		} else {
-			new = append(new, "("+term+")")
+			new += "(" + term + ")"
 		}
 	}
-	return strings.Join(new, " && ")
+	return new
 }
 
 func disjoin(terms []string) string {
@@ -101,29 +112,65 @@ func negate(term string) string {
 	}
 }
 
-func (prop *Property) toSva(id int, sliceid int, assume bool) (string, string) {
-	sva := ""
+func wrap(str string, lineWidth int) []string {
+	lines := []string{}
+	for len(str) > lineWidth {
+		done := false
+		for i := lineWidth; i >= 0; i-- {
+			if str[i] == ' ' {
+				lines = append(lines, str[:i])
+				str = str[i+1:]
+				done = true
+				break
+			}
+		}
+
+		if !done {
+			for i := lineWidth + 1; i < len(str); i++ {
+				if str[i] == ' ' {
+					lines = append(lines, str[:i])
+					str = str[i+1:]
+					break
+				}
+			}
+		}
+	}
+	if len(str) > 0 {
+		lines = append(lines, str)
+	}
+	return lines
+}
+
+func (prop *Property) toSva(assume bool, lineWidth int) string {
+	pre := ""
+	arrow := ""
+	post := prop.postCondition
 	if len(prop.preConditions) > 0 {
 		slices.Reverse(prop.preConditions)
-		sva = conjoin(prop.preConditions) + " |-> " + prop.postCondition
-	} else {
-		sva = prop.postCondition
+		pre = conjoin(prop.preConditions)
+		arrow = " " + prop.step + " "
 	}
-
-	prefix := "GenProp"
-	if prop.name != "" {
-		prefix = prop.name
-	}
-	gen_name := prefix + "_" + strconv.Itoa(sliceid) + "_" + strconv.Itoa(id)
 
 	assume_assert := "assert"
 	if assume {
 		assume_assert = "assume"
 	}
-	return gen_name, gen_name + ": " + assume_assert + " property (" + sva + ");"
+	start := prop.name + ": " + assume_assert + " property ("
+	end := ");"
+
+	var str string
+	if len(arrow) > 0 && len(pre)+len(arrow)+len(post) > lineWidth {
+		str = start + "\n" + "    " + strings.Join(wrap(pre, lineWidth), "\n    ") + "\n    " + strings.Trim(arrow, " ") + "\n    " + strings.Join(wrap(post, lineWidth), "\n    ") + "\n" + end
+	} else if len(str) > lineWidth {
+		str = start + "\n" + "    " + strings.Join(wrap(pre+arrow+post, lineWidth), "\n    ") + "\n" + end
+	} else {
+		str = start + pre + arrow + post + end
+	}
+
+	return str
 }
 
-func (seq *FlatProofSequence) toTclSva(slice int) (string, string) {
+func (seq *FlatProofSequence) toTclSva(slice int, lineWidth int) (string, string) {
 	sva := ""
 	patterns := ""
 
@@ -135,9 +182,9 @@ func (seq *FlatProofSequence) toTclSva(slice int) (string, string) {
 		prop_names := ""
 		sva += "`ifndef REMOVE_SLICE_" + strconv.Itoa(i) + "\n"
 		for _, prop := range step {
-			prop_name, prop_sva := prop.toSva(id, i, slice != -1 && i != slice)
+			prop_sva := prop.toSva(slice != -1 && i != slice, lineWidth)
 			id += 1
-			prop_names += " *." + prop_name
+			prop_names += " *." + prop.name
 			sva += prop_sva + "\n"
 		}
 		patterns += " {" + strings.Trim(prop_names, " ") + "}"

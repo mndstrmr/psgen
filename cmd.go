@@ -69,7 +69,8 @@ func main() {
 		props: make([][]*Property, 0),
 	}
 	prop.flatten(&seq, 0)
-	tcl, sva := seq.toTclSva(slice)
+	seq.checkNames()
+	tcl, sva := seq.toTclSva(slice, 100)
 
 	if tclOut != "" {
 		os.WriteFile("out.tcl", []byte("proof_structure -init root -copy_asserts -copy_assumes\n"+tcl), 0664)

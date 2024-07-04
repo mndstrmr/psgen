@@ -10,6 +10,7 @@ type LocalScope struct {
 }
 
 type VerbatimOrState struct {
+	label    string
 	str      string
 	verbatim bool
 }
@@ -33,7 +34,8 @@ type InStatesSubProofCommand struct {
 }
 
 type LemmaProofCommand struct {
-	name string
+	label string
+	name  string
 }
 
 type BlockProofCommand struct {
@@ -59,6 +61,7 @@ type ProofHelper interface {
 type NullProofHelpher struct{}
 
 type SplitProofCase struct {
+	label     string
 	condition VerbatimOrState
 	helper    ProofHelper
 }
@@ -109,8 +112,9 @@ type SequencedProofSteps struct {
 }
 
 type Lemma struct {
-	name string
-	seq  SequencedProofSteps
+	label string
+	name  string
+	seq   SequencedProofSteps
 }
 
 type ProofDocument struct {
@@ -142,6 +146,7 @@ func blocksToProofHelper(blocks []Block) ProofHelper {
 
 		for _, arg := range blocks[0].first.inlineArgs {
 			cases = append(cases, SplitProofCase{
+				label:     "",
 				condition: arg.toVerbatimOrState(),
 				helper:    &NullProofHelpher{},
 			})
@@ -153,6 +158,7 @@ func blocksToProofHelper(blocks []Block) ProofHelper {
 			}
 			block.first.fixArgs(1)
 			cases = append(cases, SplitProofCase{
+				label:     block.first.label,
 				condition: block.first.verbatimOrStateArg(0),
 				helper:    blocksToProofHelper(block.body),
 			})
@@ -256,7 +262,8 @@ func blockToProofCommand(block Block, scope *LocalScope) ProofCommand {
 	case "lemma":
 		block.first.fixArgs(1)
 		return &LemmaProofCommand{
-			name: block.first.wordArg(0),
+			label: block.first.label,
+			name:  block.first.wordArg(0),
 		}
 	case "have":
 		block.first.fixArgs(1)
@@ -299,8 +306,9 @@ func blocksToProofDocument(blocks []Block) ProofDocument {
 			block.first.fixArgs(1)
 			name := block.first.wordArg(0)
 			lemmas[name] = Lemma{
-				name: name,
-				seq:  blocksToSequenceProof(block.body),
+				label: block.first.label,
+				name:  name,
+				seq:   blocksToSequenceProof(block.body),
 			}
 		case "def":
 			block.first.fixArgs(1)

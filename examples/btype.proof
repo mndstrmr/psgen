@@ -1,22 +1,22 @@
 def fast_structure
-    have ($past(instr_will_progress))
+    Fast: have ($past(instr_will_progress))
 
 def standard_instr
     cond (finishing_executed)
-    unreach: have (no_unreach)
-    have (addr_match)
-    have (csrs_match)
-    have (pc_match)
-    have (data_match)
+    Unreach: have (no_unreach)
+    Addr: have (addr_match)
+    CSRs: have (csrs_match)
+    PC: have (pc_match)
+    Data: have (data_match)
 
 lemma something
   have (x)
 
-lemma btype
+BType: lemma btype
     state btype_progress (`IDEX_IS_BTYPE && instr_will_progress)
     state btype_fin (`WBEXC_ISS_BTYPE && finishing_executed)
 
-    graph_induction +rev
+    GraphInd: graph_induction +rev
         cond (`IDEX_IS_BTYPE & `CR.instr_valid_id & ~ex_err & ~ex_kill)
 
         inv nobranch (~ex_has_branched_d)
@@ -26,23 +26,23 @@ lemma btype
 
         node stall nobranch (`ID.stall_ld_hz) => stall progress
         node outstanding match (`IDG.outstanding_memory_access) => outstanding progress
-            split_bool (ex_has_branched_d)
+            split_bool Branched:(ex_has_branched_d)
         node progress match btype_progress
 
     in btype_fin
         use fast_structure
 
     /
-    lemma something
+    Something: lemma something
 
     in btype_progress
-        have (~`CR.branch_decision |-> spec_post_pc == pre_nextpc)
-        have (`CR.branch_decision |-> spec_post_pc == post_pc)
+        NoBranch: have (~`CR.branch_decision |-> spec_post_pc == pre_nextpc)
+        Branch: have (`CR.branch_decision |-> spec_post_pc == post_pc)
 
     /
 
     in btype_fin
         use standard_instr
             split
-                case (wbexc_err)
-                case (~wbexc_err)
+                Err: case (wbexc_err)
+                NoErr: case (~wbexc_err)

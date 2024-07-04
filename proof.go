@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"slices"
+	"strconv"
 )
 
 type Scope struct {
@@ -46,6 +48,7 @@ func (scope *Scope) getState(name string) string {
 
 type Provable interface {
 	prefix(string)
+	suffix(string)
 	condition(string)
 	copy() Provable
 	flatten(*FlatProofSequence, int) int
@@ -53,6 +56,26 @@ type Provable interface {
 
 type FlatProofSequence struct {
 	props [][]*Property
+}
+
+func (seq *FlatProofSequence) checkNames() {
+	names := []string{}
+	unnamed := 0
+	for _, group := range seq.props {
+		for _, prop := range group {
+			if prop.name == "" {
+				unnamed += 1
+				fmt.Fprintln(os.Stderr, fmt.Errorf("warning: unnamed property with post condition %s. Giving it name Unnamed_%d", prop.postCondition, unnamed))
+				prop.name = "Unnamed_" + strconv.Itoa(unnamed)
+			} else if slices.Contains(names, prop.name) {
+				unnamed += 1
+				fmt.Fprintln(os.Stderr, fmt.Errorf("warning: multiple properties with name %s, renaming to %s_%d", prop.name, prop.name, unnamed))
+				prop.name += "_" + strconv.Itoa(unnamed)
+			} else {
+				names = append(names, prop.name)
+			}
+		}
+	}
 }
 
 func (seq *FlatProofSequence) addTo(n int, prop *Property) {
@@ -86,6 +109,14 @@ func (prop *Property) prefix(prefix string) {
 	}
 }
 
+func (prop *Property) suffix(suffix string) {
+	if prop.name == "" {
+		prop.name = suffix
+	} else {
+		prop.name = prop.name + "_" + suffix
+	}
+}
+
 func (prop *Property) condition(cond string) {
 	if !slices.Contains(prop.preConditions, cond) {
 		prop.preConditions = append(prop.preConditions, cond)
@@ -97,6 +128,7 @@ func (prop *Property) copy() Provable {
 		name:          prop.name,
 		preConditions: slices.Clone(prop.preConditions),
 		postCondition: prop.postCondition,
+		step:          prop.step,
 	}
 }
 
@@ -123,6 +155,12 @@ func (group *ProvableGroup) appendProp(prop Property) {
 func (group *ProvableGroup) prefix(prefix string) {
 	for _, step := range group.props {
 		step.prefix(prefix)
+	}
+}
+
+func (group *ProvableGroup) suffix(suffix string) {
+	for _, step := range group.props {
+		step.suffix(suffix)
 	}
 }
 
@@ -168,6 +206,12 @@ type ProvableSeq struct {
 func (seq *ProvableSeq) prefix(prefix string) {
 	for _, step := range seq.seq {
 		step.prefix(prefix)
+	}
+}
+
+func (seq *ProvableSeq) suffix(suffix string) {
+	for _, step := range seq.seq {
+		step.suffix(suffix)
 	}
 }
 
@@ -226,14 +270,18 @@ func (cmd *GraphInductionProofHelper) helpProperty(scope *Scope, prop Provable) 
 }
 
 func (cmd *SplitProofHelper) helpProperty(scope *Scope, prop Provable) Provable {
-	group := ProvableGroup{
-		props: make([]Provable, 0),
-	}
+	group := NewProvableGroup()
 
-	for _, cas := range cmd.cases {
+	for i, cas := range cmd.cases {
 		new := prop.copy()
+		new = cas.helper.helpProperty(scope, new)
 		new.condition(cas.condition.getString(scope))
-		group.append(cas.helper.helpProperty(scope, new))
+		if cas.label != "" {
+			new.suffix(cas.label)
+		} else {
+			new.suffix("Case" + strconv.Itoa(i))
+		}
+		group.append(new)
 	}
 
 	return &ProvableSeq{
@@ -255,8 +303,19 @@ func (cmd *SplitBoolProofHelper) helpProperty(scope *Scope, prop Provable) Prova
 		for j, pivot := range cmd.pivots {
 			if i&(1<<j) != 0 {
 				new.condition(pivot.getString(scope))
+
+				if pivot.label != "" {
+					new.suffix(pivot.label)
+				} else {
+					new.suffix("1")
+				}
 			} else {
 				new.condition(negate(pivot.getString(scope)))
+				if pivot.label != "" {
+					new.suffix("Not" + pivot.label)
+				} else {
+					new.suffix("0")
+				}
 			}
 		}
 
@@ -274,7 +333,11 @@ func (cmd *LemmaProofCommand) genProperty(scope *Scope) Provable {
 		panic(fmt.Errorf("lemma does not exist: %s", cmd.name))
 	}
 	fresh := scope.cloneRoot()
-	return lemma.genProperty(&fresh)
+	prop := lemma.genProperty(&fresh)
+	if cmd.label != "" {
+		prop.prefix(cmd.label)
+	}
+	return prop
 }
 
 func (cmd *BlockProofCommand) genProperty(scope *Scope) Provable {
@@ -328,13 +391,13 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 	if len(cmd.entryNodes) > 0 {
 		// Base cases:
 		// Check that the entry condition implies one of the entry nodes are active
-		prop := NewPropertyFrom("initial", unionNodeConds(cmd.entryNodes))
+		prop := NewPropertyFrom("Initial_Entry", unionNodeConds(cmd.entryNodes))
 		prop.condition(cmd.entryCondition)
 		group.appendProp(prop)
 
 		// Check that whichever entry node we are in, that node's invariant is satisfied
 		for _, node := range cmd.entryNodes {
-			prop := NewPropertyFrom("initial_"+node, cmd.invariants[cmd.findNode(node).invariant])
+			prop := NewPropertyFrom("Initial_"+camelCase(node), cmd.invariants[cmd.findNode(node).invariant])
 			prop.condition(cmd.findNode(node).condition.getString(scope))
 			prop.condition(cmd.entryCondition)
 			group.appendProp(prop)
@@ -350,14 +413,14 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 
 		sub_group := NewProvableGroup()
 		// The condition for one of my outgoing nodes is met in the next cycle
-		prop := NewPropertyFrom(node.name+"_step", unionNodeConds(node.nextNodes))
+		prop := NewPropertyFrom(camelCase(node.name)+"_Step", unionNodeConds(node.nextNodes))
 		prop.step = "|=>"
 		prop.condition(node.condition.getString(scope))
 		sub_group.appendProp(prop)
 
 		for _, dst := range node.nextNodes {
 			// If last cycle I was active and this cycle you are active, then my invariant being true last cycle implies your invariant is true this cycle
-			prop := NewPropertyFrom(node.name+"_"+dst+"_inv", cmd.invariants[cmd.findNode(dst).invariant])
+			prop := NewPropertyFrom(camelCase(node.name)+"_"+camelCase(dst)+"_Inv", cmd.invariants[cmd.findNode(dst).invariant])
 			prop.condition("$past(" + node.condition.getString(scope) + ")")
 			prop.condition(cmd.findNode(dst).condition.getString(scope))
 			prop.condition("$past(" + cmd.invariants[node.invariant] + ")")
@@ -380,7 +443,7 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 			}
 
 			// If my condition is true now, then in the previous cycle one of the conditions of one of the incoming nodes is true
-			prop := NewPropertyFrom(node.name+"_rev", entryCarvout)
+			prop := NewPropertyFrom(camelCase(node.name)+"_Rev", entryCarvout)
 			prop.condition(node.condition.getString(scope))
 			sub_group.appendProp(prop)
 		}
@@ -437,5 +500,9 @@ func (scope *LocalScope) applyScopeConds(prop Provable) {
 }
 
 func (lemma *Lemma) genProperty(scope *Scope) Provable {
-	return lemma.seq.genProperty(scope)
+	prop := lemma.seq.genProperty(scope)
+	if lemma.label != "" {
+		prop.prefix(lemma.label)
+	}
+	return prop
 }
