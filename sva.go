@@ -170,34 +170,58 @@ func (prop *Property) toSva(assume bool, lineWidth int) string {
 	return str
 }
 
-func (seq *FlatProofSequence) toTclSva(slice int, lineWidth int) (string, string) {
+func (seq *FlatProofSequence) toSva(slice int, lineWidth int) string {
 	sva := ""
-	patterns := ""
 
-	id := 0
 	for i, step := range seq.props {
 		if slice != -1 && i > slice {
 			break
 		}
-		prop_names := ""
 		sva += "`ifndef REMOVE_SLICE_" + strconv.Itoa(i) + "\n"
 		for _, prop := range step {
-			prop_sva := prop.toSva(slice != -1 && i != slice, lineWidth)
-			id += 1
-			prop_names += " *." + prop.name
-			sva += prop_sva + "\n"
+			sva += prop.toSva(slice != -1 && i != slice, lineWidth) + "\n"
 		}
-		patterns += " {" + strings.Trim(prop_names, " ") + "}"
 		sva += "`endif\n\n"
 	}
 
-	tcl := ""
-	if slice != -1 {
-		tcl =
-			"proof_structure -create assume_guarantee" +
-				" -from root" +
-				" -property [list" + patterns + "]\n"
+	return sva
+}
+
+func (seq *FlatProofSequence) toTasks() string {
+	cmds := ""
+
+	for i := range seq.props {
+		prop_names := ""
+		for _, prev := range seq.props[:i+1] {
+			for _, prop := range prev {
+				prop_names += " *." + prop.name
+			}
+		}
+		pattern := "{" + prop_names[1:] + "}"
+		cmds += "task -create Step" + strconv.Itoa(i) + " -copy " + pattern + "\n"
+		for _, prev := range seq.props[:i] {
+			for _, prop := range prev {
+				cmds += "assume -from_assert Step" + strconv.Itoa(i) + "::*." + prop.name + "\n"
+			}
+		}
 	}
 
-	return tcl, sva
+	return cmds
+}
+
+func (seq *FlatProofSequence) toProofStructure() string {
+	patterns := ""
+
+	for _, step := range seq.props {
+		prop_names := ""
+		for _, prop := range step {
+			prop_names += " *." + prop.name
+		}
+		patterns += " {" + strings.Trim(prop_names, " ") + "}"
+	}
+
+	return "proof_structure -init root -copy_asserts -copy_assumes\n" +
+		"proof_structure -create assume_guarantee" +
+		" -from root" +
+		" -property [list" + patterns + "]\n"
 }

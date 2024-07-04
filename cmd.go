@@ -12,6 +12,7 @@ var rootLemma string
 var svOut string
 var tclOut string
 var slice int
+var task bool
 
 func main() {
 	paths = []string{}
@@ -23,6 +24,7 @@ func main() {
 	flag.IntVar(&slice, "slice", -1, "select a slice to assert, those leading up to it will be assumed and those after ignored")
 	flag.StringVar(&svOut, "sv-out", "out.sv", "path to write generated SystemVerilog to")
 	flag.StringVar(&tclOut, "tcl-out", "", "path to write generated TCL to, or empty to ignore")
+	flag.BoolVar(&task, "task", false, "instead of using proof_structure, generate a set of TCL tasks of assumptions and assertions")
 	flag.Parse()
 
 	if len(paths) == 0 {
@@ -70,10 +72,17 @@ func main() {
 	}
 	prop.flatten(&seq, 0)
 	seq.checkNames()
-	tcl, sva := seq.toTclSva(slice, 100)
+
+	sva := seq.toSva(slice, 100)
+	os.WriteFile(svOut, []byte(sva), 0664)
 
 	if tclOut != "" {
-		os.WriteFile("out.tcl", []byte("proof_structure -init root -copy_asserts -copy_assumes\n"+tcl), 0664)
+		var tcl string
+		if task {
+			tcl = seq.toTasks()
+		} else {
+			tcl = seq.toProofStructure()
+		}
+		os.WriteFile(tclOut, []byte(tcl), 0664)
 	}
-	os.WriteFile("out.sv", []byte(sva), 0664)
 }
