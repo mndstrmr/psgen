@@ -1,20 +1,121 @@
 package main
 
 import (
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
 
-func (prop *Property) toSva(id int, sliceid int, assume bool) (string, string) {
-	sva := "(" + prop.revImplications[0] + ")"
-	for _, s := range prop.revImplications[1:] {
-		sva = "(" + s + ")" + " |-> " + sva
+func isParenthesised(str string) bool {
+	if len(str) == 0 {
+		return false
 	}
+
+	openParen := str[0]
+	if openParen != '(' && openParen != '[' && openParen != '{' {
+		return false
+	}
+	closeParen := str[len(str)-1]
+	if (openParen == '(' && closeParen != ')') || (openParen == '[' && closeParen != ']') || (openParen == '{' && closeParen != '}') {
+		return false
+	}
+
+	depth := 1
+	for _, c := range str[1 : len(str)-1] {
+		if c == '(' || c == '[' || c == '{' {
+			depth += 1
+		} else if c == ')' || c == ']' || c == '}' {
+			depth -= 1
+			if depth == 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isUnary(str string) bool {
+	str = strings.Trim(str, " ")
+	re := regexp.MustCompile("^[$a-z`A-Z0-9_~.]+([([{]?)")
+	groups := re.FindStringSubmatchIndex(str)
+	if groups[1] == len(str) {
+		return true
+	}
+	openParen := str[groups[1]-1]
+	if openParen == '(' || openParen == '[' || openParen == '{' {
+		return isParenthesised(str[groups[1]-1:])
+	}
+	return false
+}
+
+func conjoin(terms []string) string {
+	re := regexp.MustCompile("^[a-z`A-Z0-9_& ~.]*$")
+	new := []string{}
+	for _, term := range terms {
+		if re.MatchString(term) || isUnary(term) {
+			new = append(new, term)
+			continue
+		}
+
+		subterms := strings.Split(term, "&")
+		allSubtermsUnary := true
+		for _, term := range subterms {
+			if !isUnary(term) {
+				allSubtermsUnary = false
+				break
+			}
+		}
+
+		if allSubtermsUnary {
+			new = append(new, term)
+		} else {
+			new = append(new, "("+term+")")
+		}
+	}
+	return strings.Join(new, " && ")
+}
+
+func disjoin(terms []string) string {
+	re := regexp.MustCompile("^[a-z`A-Z0-9_| ~.]*$")
+	new := []string{}
+	for _, term := range terms {
+		if re.MatchString(term) {
+			new = append(new, term)
+		} else {
+			new = append(new, "("+term+")")
+		}
+	}
+	return strings.Join(new, " || ")
+}
+
+func negate(term string) string {
+	re := regexp.MustCompile("^[a-z`A-Z0-9_.~]*$")
+	if !re.MatchString(term) {
+		return "~(" + term + ")"
+	}
+	if strings.HasPrefix(term, "~") {
+		return term[1:]
+	} else {
+		return "~" + term
+	}
+}
+
+func (prop *Property) toSva(id int, sliceid int, assume bool) (string, string) {
+	sva := ""
+	if len(prop.preConditions) > 0 {
+		slices.Reverse(prop.preConditions)
+		sva = conjoin(prop.preConditions) + " |-> " + prop.postCondition
+	} else {
+		sva = prop.postCondition
+	}
+
 	prefix := "GenProp"
 	if prop.name != "" {
 		prefix = prop.name
 	}
 	gen_name := prefix + "_" + strconv.Itoa(sliceid) + "_" + strconv.Itoa(id)
+
 	assume_assert := "assert"
 	if assume {
 		assume_assert = "assume"

@@ -63,14 +63,18 @@ func (seq *FlatProofSequence) addTo(n int, prop *Property) {
 }
 
 type Property struct {
-	name            string
-	revImplications []string
+	name          string
+	preConditions []string
+	postCondition string
+	step          string
 }
 
 func NewPropertyFrom(name string, statement string) Property {
 	return Property{
-		name:            name,
-		revImplications: []string{statement},
+		name:          name,
+		postCondition: statement,
+		preConditions: []string{},
+		step:          "|->",
 	}
 }
 
@@ -83,13 +87,16 @@ func (prop *Property) prefix(prefix string) {
 }
 
 func (prop *Property) condition(cond string) {
-	prop.revImplications = append(prop.revImplications, cond)
+	if !slices.Contains(prop.preConditions, cond) {
+		prop.preConditions = append(prop.preConditions, cond)
+	}
 }
 
 func (prop *Property) copy() Provable {
 	return &Property{
-		name:            prop.name,
-		revImplications: slices.Clone(prop.revImplications),
+		name:          prop.name,
+		preConditions: slices.Clone(prop.preConditions),
+		postCondition: prop.postCondition,
 	}
 }
 
@@ -240,7 +247,7 @@ func (cmd *SplitBoolProofHelper) helpProperty(scope *Scope, prop Provable) Prova
 	}
 
 	if len(cmd.pivots) > 16 {
-		panic("to many pivots")
+		panic("too many pivots")
 	}
 
 	i := 0
@@ -251,7 +258,7 @@ func (cmd *SplitBoolProofHelper) helpProperty(scope *Scope, prop Provable) Prova
 			if i&(1<<j) != 0 {
 				new.condition(pivot.getString(scope))
 			} else {
-				new.condition("~(" + pivot.getString(scope) + ")")
+				new.condition(negate(pivot.getString(scope)))
 			}
 		}
 
@@ -313,21 +320,26 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 	group := NewProvableGroup()
 
 	unionNodeConds := func(nodes []string) string {
-		statesActive := ""
+		conds := []string{}
 		for _, node := range nodes {
-			statesActive += " | (" + cmd.findNode(node).condition.getString(scope) + ")"
+			conds = append(conds, cmd.findNode(node).condition.getString(scope))
 		}
-		return statesActive[3:]
+		return disjoin(conds)
 	}
 
 	if len(cmd.entryNodes) > 0 {
 		// Base cases:
 		// Check that the entry condition implies one of the entry nodes are active
-		group.appendProp(NewPropertyFrom("initial", "("+cmd.entryCondition+") |-> ("+unionNodeConds(cmd.entryNodes)+")"))
+		prop := NewPropertyFrom("initial", unionNodeConds(cmd.entryNodes))
+		prop.condition(cmd.entryCondition)
+		group.appendProp(prop)
 
 		// Check that whichever entry node we are in, that node's invariant is satisfied
 		for _, node := range cmd.entryNodes {
-			group.appendProp(NewPropertyFrom("initial_"+node, "("+cmd.entryCondition+") & ("+cmd.findNode(node).condition.getString(scope)+") |-> ("+cmd.invariants[cmd.findNode(node).invariant]+")"))
+			prop := NewPropertyFrom("initial_"+node, cmd.invariants[cmd.findNode(node).invariant])
+			prop.condition(cmd.findNode(node).condition.getString(scope))
+			prop.condition(cmd.entryCondition)
+			group.appendProp(prop)
 		}
 	}
 
@@ -340,11 +352,18 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 
 		sub_group := NewProvableGroup()
 		// The condition for one of my outgoing nodes is met in the next cycle
-		sub_group.appendProp(NewPropertyFrom(node.name+"_step", "("+node.condition.getString(scope)+") |=> ("+unionNodeConds(node.nextNodes)+")"))
+		prop := NewPropertyFrom(node.name+"_step", unionNodeConds(node.nextNodes))
+		prop.step = "|=>"
+		prop.condition(node.condition.getString(scope))
+		sub_group.appendProp(prop)
 
 		for _, dst := range node.nextNodes {
 			// If last cycle I was active and this cycle you are active, then my invariant being true last cycle implies your invariant is true this cycle
-			sub_group.appendProp(NewPropertyFrom(node.name+"_"+dst+"_inv", "$past("+node.condition.getString(scope)+") && ("+cmd.findNode(dst).condition.getString(scope)+") && $past("+cmd.invariants[node.invariant]+") |-> ("+cmd.invariants[cmd.findNode(dst).invariant]+")"))
+			prop := NewPropertyFrom(node.name+"_"+dst+"_inv", cmd.invariants[cmd.findNode(dst).invariant])
+			prop.condition("$past(" + node.condition.getString(scope) + ")")
+			prop.condition(cmd.findNode(dst).condition.getString(scope))
+			prop.condition("$past(" + cmd.invariants[node.invariant] + ")")
+			sub_group.appendProp(prop)
 		}
 
 		if cmd.backward {
@@ -355,14 +374,17 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 					reverseNodes = append(reverseNodes, other.name)
 				}
 			}
-			backwardStr := unionNodeConds(reverseNodes)
+			backwardStr := "$past(" + unionNodeConds(reverseNodes) + ")"
 
-			entryCarvout := ""
+			entryCarvout := backwardStr
 			if slices.Contains(cmd.entryNodes, node.name) {
-				entryCarvout += " | (" + cmd.entryCondition + ")"
+				entryCarvout = conjoin([]string{backwardStr, cmd.entryCondition})
 			}
 
-			sub_group.appendProp(NewPropertyFrom(node.name+"_rev", "("+node.condition.getString(scope)+") |-> $past("+backwardStr+")"+entryCarvout))
+			// If my condition is true now, then in the previous cycle one of the conditions of one of the incoming nodes is true
+			prop := NewPropertyFrom(node.name+"_rev", entryCarvout)
+			prop.condition(node.condition.getString(scope))
+			sub_group.appendProp(prop)
 		}
 
 		group.append(node.helper.helpProperty(scope, &sub_group))
