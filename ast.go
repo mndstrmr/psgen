@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 )
 
 type LocalScope struct {
@@ -73,6 +74,12 @@ type SplitProofHelper struct {
 type SplitBoolProofHelper struct {
 	pivots []VerbatimOrState
 	helper ProofHelper
+}
+
+type KInductionProofHelper struct {
+	label    string
+	k        int
+	wireSets []string
 }
 
 type GraphInductionNodeDefinition struct {
@@ -166,6 +173,17 @@ func blocksToProofHelper(blocks []Block) ProofHelper {
 
 		return &SplitProofHelper{
 			cases: cases,
+		}
+	case "k_induction":
+		blocks[0].first.fixArgs(1)
+		k, err := strconv.Atoi(blocks[0].first.wordArg(0))
+		if err != nil {
+			panic(fmt.Errorf("expected an integer for k"))
+		}
+		return &KInductionProofHelper{
+			label:    blocks[0].first.label,
+			k:        k,
+			wireSets: []string{},
 		}
 	case "graph_induction":
 		blocks[0].first.fixArgs(0)

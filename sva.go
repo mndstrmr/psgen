@@ -15,6 +15,17 @@ func camelCase(str string) string {
 	return out
 }
 
+func past(str string, n int) string {
+	re := regexp.MustCompile("[$a-z`A-Z_][$a-z`A-Z0-9_.]+")
+	end := ""
+	if n != 1 {
+		end = ", " + strconv.Itoa(n)
+	}
+	return string(re.ReplaceAllFunc([]byte(str), func(name []byte) []byte {
+		return []byte("$past(" + string(name) + end + ")")
+	}))
+}
+
 func isParenthesised(str string) bool {
 	if len(str) == 0 {
 		return false
@@ -47,6 +58,9 @@ func isUnary(str string) bool {
 	str = strings.Trim(str, " ")
 	re := regexp.MustCompile("^[$a-z`A-Z0-9_~.]+([([{]?)")
 	groups := re.FindStringSubmatchIndex(str)
+	if groups == nil {
+		return false
+	}
 	if groups[1] == len(str) {
 		return true
 	}
@@ -143,11 +157,14 @@ func wrap(str string, lineWidth int) []string {
 
 func (prop *Property) toSva(assume bool, lineWidth int) string {
 	pre := ""
+	if prop.wait != 0 {
+		pre = "##" + strconv.Itoa(prop.wait) + " "
+	}
 	arrow := ""
 	post := prop.postCondition
 	if len(prop.preConditions) > 0 {
 		slices.Reverse(prop.preConditions)
-		pre = conjoin(prop.preConditions)
+		pre += conjoin(prop.preConditions)
 		arrow = " " + prop.step + " "
 	}
 
@@ -160,9 +177,9 @@ func (prop *Property) toSva(assume bool, lineWidth int) string {
 
 	var str string
 	if len(arrow) > 0 && len(pre)+len(arrow)+len(post) > lineWidth {
-		str = start + "\n" + "    " + strings.Join(wrap(pre, lineWidth), "\n    ") + "\n    " + strings.Trim(arrow, " ") + "\n    " + strings.Join(wrap(post, lineWidth), "\n    ") + "\n" + end
+		str = start + "\n" + "    " + strings.Join(wrap(pre, lineWidth-4), "\n    ") + "\n    " + strings.Trim(arrow, " ") + "\n    " + strings.Join(wrap(post, lineWidth-4), "\n    ") + "\n" + end
 	} else if len(str) > lineWidth {
-		str = start + "\n" + "    " + strings.Join(wrap(pre+arrow+post, lineWidth), "\n    ") + "\n" + end
+		str = start + "\n" + "    " + strings.Join(wrap(pre+arrow+post, lineWidth-4), "\n    ") + "\n" + end
 	} else {
 		str = start + pre + arrow + post + end
 	}
@@ -188,7 +205,8 @@ func (seq *FlatProofSequence) toSva(slice int, lineWidth int) string {
 }
 
 func (seq *FlatProofSequence) toTasks() string {
-	cmds := ""
+	cmds := "proc enter_stopat {} { stopat -reset {*} }\n" +
+		"proc exit_stopat {} { stopat -reset -clear }\n"
 
 	for i := range seq.props {
 		prop_names := ""
@@ -198,7 +216,7 @@ func (seq *FlatProofSequence) toTasks() string {
 			}
 		}
 		pattern := "{" + prop_names[1:] + "}"
-		cmds += "task -create Step" + strconv.Itoa(i) + " -copy " + pattern + "\n"
+		cmds += "task -create Step" + strconv.Itoa(i) + " -copy_assumes -copy " + pattern + "\n"
 		for _, prev := range seq.props[:i] {
 			for _, prop := range prev {
 				cmds += "assume -from_assert Step" + strconv.Itoa(i) + "::*." + prop.name + "\n"

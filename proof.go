@@ -46,12 +46,38 @@ func (scope *Scope) getState(name string) string {
 	panic(fmt.Errorf("could not find state %s", name))
 }
 
+func (scope *Scope) getPreConditions() []string {
+	pres := []string{}
+	for _, scope := range scope.stack {
+		for _, cond := range scope.conditions {
+			pres = append(pres, cond)
+		}
+	}
+	return pres
+}
+
 type Provable interface {
-	prefix(string)
-	suffix(string)
-	condition(string)
+	walkProps(func(*Property))
 	copy() Provable
 	flatten(*FlatProofSequence, int) int
+}
+
+func prefix(prop Provable, prefix string) {
+	prop.walkProps(func(prop *Property) {
+		prop.prefix(prefix)
+	})
+}
+
+func suffix(prop Provable, suffix string) {
+	prop.walkProps(func(prop *Property) {
+		prop.suffix(suffix)
+	})
+}
+
+func condition(prop Provable, cond string) {
+	prop.walkProps(func(prop *Property) {
+		prop.condition(cond)
+	})
 }
 
 type FlatProofSequence struct {
@@ -90,15 +116,21 @@ type Property struct {
 	preConditions []string
 	postCondition string
 	step          string
+	wait          int
 }
 
-func NewPropertyFrom(name string, statement string) Property {
+func NewPropertyFrom(name string, statement string, scope *Scope) Property {
 	return Property{
 		name:          name,
 		postCondition: statement,
-		preConditions: []string{},
+		preConditions: scope.getPreConditions(),
 		step:          "|->",
+		wait:          0,
 	}
+}
+
+func (prop *Property) walkProps(f func(*Property)) {
+	f(prop)
 }
 
 func (prop *Property) prefix(prefix string) {
@@ -129,6 +161,7 @@ func (prop *Property) copy() Provable {
 		preConditions: slices.Clone(prop.preConditions),
 		postCondition: prop.postCondition,
 		step:          prop.step,
+		wait:          prop.wait,
 	}
 }
 
@@ -148,20 +181,14 @@ func NewProvableGroup() ProvableGroup {
 	}
 }
 
+func (group *ProvableGroup) walkProps(f func(*Property)) {
+	for _, prop := range group.props {
+		prop.walkProps(f)
+	}
+}
+
 func (group *ProvableGroup) appendProp(prop Property) {
 	group.props = append(group.props, &prop)
-}
-
-func (group *ProvableGroup) prefix(prefix string) {
-	for _, step := range group.props {
-		step.prefix(prefix)
-	}
-}
-
-func (group *ProvableGroup) suffix(suffix string) {
-	for _, step := range group.props {
-		step.suffix(suffix)
-	}
 }
 
 func (group *ProvableGroup) append(prop Provable) {
@@ -169,12 +196,6 @@ func (group *ProvableGroup) append(prop Provable) {
 		group.props = append(group.props, other.props...)
 	} else {
 		group.props = append(group.props, prop)
-	}
-}
-
-func (group *ProvableGroup) condition(cond string) {
-	for _, step := range group.props {
-		step.condition(cond)
 	}
 }
 
@@ -203,15 +224,9 @@ type ProvableSeq struct {
 	seq []Provable
 }
 
-func (seq *ProvableSeq) prefix(prefix string) {
-	for _, step := range seq.seq {
-		step.prefix(prefix)
-	}
-}
-
-func (seq *ProvableSeq) suffix(suffix string) {
-	for _, step := range seq.seq {
-		step.suffix(suffix)
+func (seq *ProvableSeq) walkProps(f func(*Property)) {
+	for _, prop := range seq.seq {
+		prop.walkProps(f)
 	}
 }
 
@@ -220,12 +235,6 @@ func (seq *ProvableSeq) append(prop Provable) {
 		seq.seq = append(seq.seq, other.seq...)
 	} else {
 		seq.seq = append(seq.seq, prop)
-	}
-}
-
-func (seq *ProvableSeq) condition(cond string) {
-	for _, step := range seq.seq {
-		step.condition(cond)
 	}
 }
 
@@ -259,6 +268,31 @@ func (cmd *NullProofHelpher) helpProperty(scope *Scope, prop Provable) Provable 
 	return prop
 }
 
+func (cmd *KInductionProofHelper) helpProperty(scope *Scope, prop Provable) Provable {
+	group := NewProvableGroup()
+	for k := 1; k <= cmd.k; k++ {
+		copy := prop.copy()
+		copy.walkProps(func(prop *Property) {
+			if prop.step != "|->" {
+				panic("blocking arrow in k induction property")
+			}
+
+			prop.prefix(strconv.Itoa(k) + "Ind")
+
+			step := "(" + conjoin(prop.preConditions) + ") -> (" + prop.postCondition + ")"
+			prop.preConditions = []string{}
+			prop.postCondition = step
+			for i := 1; i <= k; i++ {
+				prop.preConditions = append(prop.preConditions, past(step, i))
+			}
+			prop.wait = k
+		})
+		group.append(copy)
+	}
+	group.append(prop)
+	return &group
+}
+
 func (cmd *GraphInductionProofHelper) helpProperty(scope *Scope, prop Provable) Provable {
 	group := cmd.genCommonProperty(scope)
 	return &ProvableSeq{
@@ -275,11 +309,11 @@ func (cmd *SplitProofHelper) helpProperty(scope *Scope, prop Provable) Provable 
 	for i, cas := range cmd.cases {
 		new := prop.copy()
 		new = cas.helper.helpProperty(scope, new)
-		new.condition(cas.condition.getString(scope))
+		condition(new, cas.condition.getString(scope))
 		if cas.label != "" {
-			new.suffix(cas.label)
+			suffix(new, cas.label)
 		} else {
-			new.suffix("Case" + strconv.Itoa(i))
+			suffix(new, "Case"+strconv.Itoa(i))
 		}
 		group.append(new)
 	}
@@ -302,19 +336,19 @@ func (cmd *SplitBoolProofHelper) helpProperty(scope *Scope, prop Provable) Prova
 
 		for j, pivot := range cmd.pivots {
 			if i&(1<<j) != 0 {
-				new.condition(pivot.getString(scope))
+				condition(new, pivot.getString(scope))
 
 				if pivot.label != "" {
-					new.suffix(pivot.label)
+					suffix(new, pivot.label)
 				} else {
-					new.suffix("1")
+					suffix(new, "1")
 				}
 			} else {
-				new.condition(negate(pivot.getString(scope)))
+				condition(new, negate(pivot.getString(scope)))
 				if pivot.label != "" {
-					new.suffix("Not" + pivot.label)
+					suffix(new, "Not"+pivot.label)
 				} else {
-					new.suffix("0")
+					suffix(new, "0")
 				}
 			}
 		}
@@ -335,7 +369,7 @@ func (cmd *LemmaProofCommand) genProperty(scope *Scope) Provable {
 	fresh := scope.cloneRoot()
 	prop := lemma.genProperty(&fresh)
 	if cmd.label != "" {
-		prop.prefix(cmd.label)
+		prefix(prop, cmd.label)
 	}
 	return prop
 }
@@ -343,26 +377,32 @@ func (cmd *LemmaProofCommand) genProperty(scope *Scope) Provable {
 func (cmd *BlockProofCommand) genProperty(scope *Scope) Provable {
 	prop := cmd.seq.genProperty(scope)
 	if cmd.label != "" {
-		prop.prefix(cmd.label)
+		prefix(prop, cmd.label)
 	}
 	return prop
 }
 
 func (cmd *HaveProofCommand) genProperty(scope *Scope) Provable {
-	prop := NewPropertyFrom(cmd.label, cmd.condition)
+	prop := NewPropertyFrom(cmd.label, cmd.condition, scope)
 	return cmd.helper.helpProperty(scope, &prop)
 }
 
 func (cmd *InStatesSubProofCommand) genProperty(scope *Scope) Provable {
 	group := NewProvableGroup()
-	prop := cmd.seq.genProperty(scope)
 	for _, cond := range cmd.states {
-		copy := prop.copy()
-		copy.condition(cond.getString(scope))
-		group.append(copy)
+		scope.push(&LocalScope{
+			states:     map[string]string{},
+			conditions: []string{cond.getString(scope)},
+		})
+		prop := cmd.seq.genProperty(scope)
+		if cond.label != "" {
+			prefix(prop, cond.label)
+		}
+		group.append(prop)
+		scope.pop()
 	}
 	if cmd.label != "" {
-		group.prefix(cmd.label)
+		prefix(&group, cmd.label)
 	}
 	return &group
 }
@@ -391,13 +431,13 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 	if len(cmd.entryNodes) > 0 {
 		// Base cases:
 		// Check that the entry condition implies one of the entry nodes are active
-		prop := NewPropertyFrom("Initial_Entry", unionNodeConds(cmd.entryNodes))
+		prop := NewPropertyFrom("Initial", unionNodeConds(cmd.entryNodes), scope)
 		prop.condition(cmd.entryCondition)
 		group.appendProp(prop)
 
 		// Check that whichever entry node we are in, that node's invariant is satisfied
 		for _, node := range cmd.entryNodes {
-			prop := NewPropertyFrom("Initial_"+camelCase(node), cmd.invariants[cmd.findNode(node).invariant])
+			prop := NewPropertyFrom("Initial_"+camelCase(node), cmd.invariants[cmd.findNode(node).invariant], scope)
 			prop.condition(cmd.findNode(node).condition.getString(scope))
 			prop.condition(cmd.entryCondition)
 			group.appendProp(prop)
@@ -406,55 +446,58 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 
 	// Inductive steps:
 	for _, node := range cmd.nodes {
-		// If there are no next nodes we are allowed to leave the graph
-		if len(node.nextNodes) == 0 {
-			continue
-		}
+		subGroup := NewProvableGroup()
 
-		sub_group := NewProvableGroup()
-		// The condition for one of my outgoing nodes is met in the next cycle
-		prop := NewPropertyFrom(camelCase(node.name)+"_Step", unionNodeConds(node.nextNodes))
-		prop.step = "|=>"
-		prop.condition(node.condition.getString(scope))
-		sub_group.appendProp(prop)
+		if len(node.nextNodes) != 0 {
+			// The condition for one of my outgoing nodes is met in the next cycle, unless we leave the domain of the graph altogether
+			nexts := unionNodeConds(node.nextNodes)
+			negPre := []string{nexts}
+			for _, pre := range scope.getPreConditions() {
+				negPre = append(negPre, negate(pre))
+			}
+			nexts = disjoin(negPre)
 
-		for _, dst := range node.nextNodes {
-			// If last cycle I was active and this cycle you are active, then my invariant being true last cycle implies your invariant is true this cycle
-			prop := NewPropertyFrom(camelCase(node.name)+"_"+camelCase(dst)+"_Inv", cmd.invariants[cmd.findNode(dst).invariant])
-			prop.condition("$past(" + node.condition.getString(scope) + ")")
-			prop.condition(cmd.findNode(dst).condition.getString(scope))
-			prop.condition("$past(" + cmd.invariants[node.invariant] + ")")
-			sub_group.appendProp(prop)
+			prop := NewPropertyFrom(camelCase(node.name)+"_Step", nexts, scope)
+			prop.step = "|=>"
+			prop.condition(node.condition.getString(scope))
+			subGroup.appendProp(prop)
+
+			for _, dst := range node.nextNodes {
+				// If last cycle I was active and this cycle you are active, then my invariant being true last cycle implies your invariant is true this cycle
+				prop := NewPropertyFrom(camelCase(node.name)+"_"+camelCase(dst)+"_Inv", cmd.invariants[cmd.findNode(dst).invariant], scope)
+				condition(&prop, past(node.condition.getString(scope), 1))
+				condition(&prop, cmd.findNode(dst).condition.getString(scope))
+				condition(&prop, past(cmd.invariants[node.invariant], 1))
+				subGroup.appendProp(prop)
+			}
 		}
 
 		if cmd.backward {
 			// Reverse inductive step path
-			reverseNodes := []string{}
+			incomingNodes := []string{}
 			for _, other := range cmd.nodes {
-				if !slices.Contains(other.nextNodes, node.name) {
-					reverseNodes = append(reverseNodes, other.name)
+				if slices.Contains(other.nextNodes, node.name) {
+					incomingNodes = append(incomingNodes, other.name)
 				}
 			}
-			backwardStr := "$past(" + unionNodeConds(reverseNodes) + ")"
+			backwardStr := past(unionNodeConds(incomingNodes), 1)
 
-			entryCarvout := backwardStr
 			if slices.Contains(cmd.entryNodes, node.name) {
-				entryCarvout = conjoin([]string{backwardStr, cmd.entryCondition})
+				backwardStr = disjoin([]string{backwardStr, cmd.entryCondition})
 			}
 
 			// If my condition is true now, then in the previous cycle one of the conditions of one of the incoming nodes is true
-			prop := NewPropertyFrom(camelCase(node.name)+"_Rev", entryCarvout)
+			prop := NewPropertyFrom(camelCase(node.name)+"_Rev", backwardStr, scope)
 			prop.condition(node.condition.getString(scope))
-			sub_group.appendProp(prop)
+			subGroup.appendProp(prop)
 		}
 
-		group.append(node.helper.helpProperty(scope, &sub_group))
+		group.append(node.helper.helpProperty(scope, &subGroup))
 	}
 
 	scope.pop()
-	cmd.scope.applyScopeConds(&group)
 	if cmd.label != "" {
-		group.prefix(cmd.label)
+		prefix(&group, cmd.label)
 	}
 	return &group
 }
@@ -489,20 +532,13 @@ func (seq *SequencedProofSteps) genProperty(scope *Scope) Provable {
 	}
 
 	scope.pop()
-	seq.scope.applyScopeConds(&prop)
 	return &prop
-}
-
-func (scope *LocalScope) applyScopeConds(prop Provable) {
-	for _, cond := range scope.conditions {
-		prop.condition(cond)
-	}
 }
 
 func (lemma *Lemma) genProperty(scope *Scope) Provable {
 	prop := lemma.seq.genProperty(scope)
 	if lemma.label != "" {
-		prop.prefix(lemma.label)
+		prefix(prop, lemma.label)
 	}
 	return prop
 }
