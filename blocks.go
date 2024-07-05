@@ -15,14 +15,14 @@ type WordArg struct {
 	word  string
 }
 
-func (self *WordArg) toString() string {
-	return self.word
+func (word *WordArg) toString() string {
+	return word.word
 }
 
-func (self *WordArg) toVerbatimOrState() VerbatimOrState {
+func (word *WordArg) toVerbatimOrState() VerbatimOrState {
 	return VerbatimOrState{
-		label:    self.label,
-		str:      self.word,
+		label:    word.label,
+		str:      word.word,
 		verbatim: false,
 	}
 }
@@ -32,14 +32,14 @@ type VerbatimCommandArg struct {
 	content string
 }
 
-func (self *VerbatimCommandArg) toString() string {
-	return "[[" + self.content + "]]"
+func (verbatim *VerbatimCommandArg) toString() string {
+	return "[[" + verbatim.content + "]]"
 }
 
-func (self *VerbatimCommandArg) toVerbatimOrState() VerbatimOrState {
+func (verbatim *VerbatimCommandArg) toVerbatimOrState() VerbatimOrState {
 	return VerbatimOrState{
-		label:    self.label,
-		str:      self.content,
+		label:    verbatim.label,
+		str:      verbatim.content,
 		verbatim: true,
 	}
 }
@@ -234,7 +234,7 @@ func lineDepth(line string) int {
 			return c
 		}
 	}
-	panic("unreachable")
+	return -1
 }
 
 func parseBlocks(lines []string, parentDepth int) (int, []Block) {
@@ -244,12 +244,19 @@ func parseBlocks(lines []string, parentDepth int) (int, []Block) {
 	for l < len(lines) {
 		line := lines[l]
 
-		if len(strings.Trim(line, " \t")) == 0 {
+		preComment := strings.SplitN(line, "#", 2)
+		if len(preComment) > 1 {
+			line = preComment[1]
+		}
+
+		lineDepth := lineDepth(line)
+		line = strings.Trim(line, " \t")
+
+		if len(line) == 0 {
 			l += 1
 			continue
 		}
 
-		lineDepth := lineDepth(line)
 		if lineDepth > parentDepth && nestedDepth == -1 {
 			nestedDepth = lineDepth
 		}
@@ -262,14 +269,13 @@ func parseBlocks(lines []string, parentDepth int) (int, []Block) {
 			panic(fmt.Errorf("unexpected indent"))
 		}
 
-		commandStr := strings.Trim(line, " \t")
 		for l < len(lines) {
-			if strings.HasSuffix(commandStr, "\\") {
+			if strings.HasSuffix(line, "\\") {
 				l += 1
-				commandStr = commandStr[:len(commandStr)-1] + strings.Trim(lines[l], " \t")
-			} else if strings.HasSuffix(commandStr, ":") {
+				line = line[:len(line)-1] + strings.Trim(lines[l], " \t")
+			} else if strings.HasSuffix(line, ":") {
 				l += 1
-				commandStr = commandStr + strings.Trim(lines[l], " \t")
+				line = line + strings.Trim(lines[l], " \t")
 			} else {
 				break
 			}
@@ -278,7 +284,7 @@ func parseBlocks(lines []string, parentDepth int) (int, []Block) {
 		incL, body := parseBlocks(lines[l+1:], nestedDepth)
 
 		blocks = append(blocks, Block{
-			first: parseCommand(commandStr),
+			first: parseCommand(line),
 			body:  body,
 		})
 
@@ -287,13 +293,13 @@ func parseBlocks(lines []string, parentDepth int) (int, []Block) {
 	return l, blocks
 }
 
-func dumpBlock(blocks []Block, indent int) {
-	for _, block := range blocks {
-		fmt.Print(strings.Repeat(">", indent) + block.first.operator)
-		for _, arg := range block.first.inlineArgs {
-			fmt.Print(" " + arg.toString())
-		}
-		fmt.Println()
-		dumpBlock(block.body, indent+1)
-	}
-}
+// func dumpBlock(blocks []Block, indent int) {
+// 	for _, block := range blocks {
+// 		fmt.Print(strings.Repeat(">", indent) + block.first.operator)
+// 		for _, arg := range block.first.inlineArgs {
+// 			fmt.Print(" " + arg.toString())
+// 		}
+// 		fmt.Println()
+// 		dumpBlock(block.body, indent+1)
+// 	}
+// }

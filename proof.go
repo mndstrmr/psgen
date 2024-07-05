@@ -49,9 +49,7 @@ func (scope *Scope) getState(name string) string {
 func (scope *Scope) getPreConditions() []string {
 	pres := []string{}
 	for _, scope := range scope.stack {
-		for _, cond := range scope.conditions {
-			pres = append(pres, cond)
-		}
+		pres = append(pres, scope.conditions...)
 	}
 	return pres
 }
