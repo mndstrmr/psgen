@@ -175,3 +175,12 @@ Assertions are emit to check that:
 Now (assuming an entry was given and `+rev`) we can derive that if the condition for some node is satisfied, then it's invariant is satisfied also:
 1. At some point in the past the entry condition was met, and the graph has not been left since, by induction using 5.
 2. Every state in the graph reachable from the entry condition satisfies the invariant of that state, by induction using 1-4.
+
+## K-Induction Debug
+When attempting to determine why a property cannot be proved with k-induction it is useful to have a trace to explain why a given k does not suffice. We can obtain such a property using `k_induction`:
+```
+k_induction example
+  have (p)
+    k_induction 3
+```
+Will produce 4 properties sequenced together. Those properties are `$past(p) |-> p`, `$past(p, 2) & $past(p, 1) |-> p`, `$past(p, 3) & $past(p, 2) & $past(p, 1) |-> p`.
