@@ -35,7 +35,7 @@ func (scope *Scope) pop() *LocalScope {
 	return last
 }
 
-func (scope *Scope) getState(name string) string {
+func (scope *Scope) getState(name string) TokenStream {
 	for i := range len(scope.stack) {
 		state, ok := scope.stack[len(scope.stack)-1-i].states[name]
 		if ok {
@@ -46,8 +46,8 @@ func (scope *Scope) getState(name string) string {
 	panic(fmt.Errorf("could not find state %s", name))
 }
 
-func (scope *Scope) getPreConditions() []string {
-	pres := []string{}
+func (scope *Scope) getPreConditions() []TokenStream {
+	pres := []TokenStream{}
 	for _, scope := range scope.stack {
 		pres = append(pres, scope.conditions...)
 	}
@@ -72,7 +72,7 @@ func suffix(prop Provable, suffix string) {
 	})
 }
 
-func condition(prop Provable, cond string) {
+func condition(prop Provable, cond TokenStream) {
 	prop.walkProps(func(prop *Property) {
 		prop.condition(cond)
 	})
@@ -111,13 +111,13 @@ func (seq *FlatProofSequence) addTo(n int, prop *Property) {
 
 type Property struct {
 	name          string
-	preConditions []string
-	postCondition string
+	preConditions []TokenStream
+	postCondition TokenStream
 	step          string
 	wait          int
 }
 
-func NewPropertyFrom(name string, statement string, scope *Scope) Property {
+func NewPropertyFrom(name string, statement TokenStream, scope *Scope) Property {
 	return Property{
 		name:          name,
 		postCondition: statement,
@@ -147,10 +147,13 @@ func (prop *Property) suffix(suffix string) {
 	}
 }
 
-func (prop *Property) condition(cond string) {
-	if !slices.Contains(prop.preConditions, cond) {
-		prop.preConditions = append(prop.preConditions, cond)
+func (prop *Property) condition(cond TokenStream) {
+	for _, pre := range prop.preConditions {
+		if slices.Equal(pre, cond) {
+			return
+		}
 	}
+	prop.preConditions = append(prop.preConditions, cond)
 }
 
 func (prop *Property) copy() Provable {
@@ -277,12 +280,12 @@ func (cmd *KInductionProofHelper) helpProperty(scope *Scope, prop Provable) Prov
 
 			prop.prefix(strconv.Itoa(k) + "Ind")
 
-			step := "(" + conjoin(prop.preConditions) + ") -> (" + prop.postCondition + ")"
-			prop.preConditions = []string{}
-			prop.postCondition = step
-			for i := 1; i <= k; i++ {
-				prop.preConditions = append(prop.preConditions, past(step, i))
-			}
+			// step := "(" + conjoin(prop.preConditions) + ") -> (" + prop.postCondition + ")"
+			// prop.preConditions = []string{}
+			// prop.postCondition = step
+			// for i := 1; i <= k; i++ {
+			// 	prop.preConditions = append(prop.preConditions, past(step, i))
+			// }
 			prop.wait = k
 		})
 		group.append(copy)
@@ -307,7 +310,7 @@ func (cmd *SplitProofHelper) helpProperty(scope *Scope, prop Provable) Provable 
 	for i, cas := range cmd.cases {
 		new := prop.copy()
 		new = cas.helper.helpProperty(scope, new)
-		condition(new, cas.condition.getString(scope))
+		condition(new, cas.condition.getStream(scope))
 		if cas.label != "" {
 			suffix(new, cas.label)
 		} else {
@@ -334,7 +337,7 @@ func (cmd *SplitBoolProofHelper) helpProperty(scope *Scope, prop Provable) Prova
 
 		for j, pivot := range cmd.pivots {
 			if i&(1<<j) != 0 {
-				condition(new, pivot.getString(scope))
+				condition(new, pivot.getStream(scope))
 
 				if pivot.label != "" {
 					suffix(new, pivot.label)
@@ -342,7 +345,7 @@ func (cmd *SplitBoolProofHelper) helpProperty(scope *Scope, prop Provable) Prova
 					suffix(new, "1")
 				}
 			} else {
-				condition(new, negate(pivot.getString(scope)))
+				condition(new, negate(pivot.getStream(scope)))
 				if pivot.label != "" {
 					suffix(new, "Not"+pivot.label)
 				} else {
@@ -389,8 +392,8 @@ func (cmd *InStatesSubProofCommand) genProperty(scope *Scope) Provable {
 	group := NewProvableGroup()
 	for _, cond := range cmd.states {
 		scope.push(&LocalScope{
-			states:     map[string]string{},
-			conditions: []string{cond.getString(scope)},
+			states:     map[string]TokenStream{},
+			conditions: []TokenStream{cond.getStream(scope)},
 		})
 		prop := cmd.seq.genProperty(scope)
 		if cond.label != "" {
@@ -418,10 +421,10 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 	scope.push(&cmd.scope)
 	group := NewProvableGroup()
 
-	unionNodeConds := func(nodes []string) string {
-		conds := []string{}
+	unionNodeConds := func(nodes []string) TokenStream {
+		conds := []TokenStream{}
 		for _, node := range nodes {
-			conds = append(conds, cmd.findNode(node).condition.getString(scope))
+			conds = append(conds, cmd.findNode(node).condition.getStream(scope))
 		}
 		return disjoin(conds)
 	}
@@ -436,7 +439,7 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 		// Check that whichever entry node we are in, that node's invariant is satisfied
 		for _, node := range cmd.entryNodes {
 			prop := NewPropertyFrom("Initial_"+camelCase(node), cmd.invariants[cmd.findNode(node).invariant], scope)
-			prop.condition(cmd.findNode(node).condition.getString(scope))
+			prop.condition(cmd.findNode(node).condition.getStream(scope))
 			prop.condition(cmd.entryCondition)
 			group.appendProp(prop)
 		}
@@ -449,7 +452,7 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 		if len(node.nextNodes) != 0 {
 			// The condition for one of my outgoing nodes is met in the next cycle, unless we leave the domain of the graph altogether
 			nexts := unionNodeConds(node.nextNodes)
-			negPre := []string{nexts}
+			negPre := []TokenStream{nexts}
 			for _, pre := range scope.getPreConditions() {
 				negPre = append(negPre, negate(pre))
 			}
@@ -457,14 +460,14 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 
 			prop := NewPropertyFrom(camelCase(node.name)+"_Step", nexts, scope)
 			prop.step = "|=>"
-			prop.condition(node.condition.getString(scope))
+			prop.condition(node.condition.getStream(scope))
 			subGroup.appendProp(prop)
 
 			for _, dst := range node.nextNodes {
 				// If last cycle I was active and this cycle you are active, then my invariant being true last cycle implies your invariant is true this cycle
 				prop := NewPropertyFrom(camelCase(node.name)+"_"+camelCase(dst)+"_Inv", cmd.invariants[cmd.findNode(dst).invariant], scope)
-				condition(&prop, past(node.condition.getString(scope), 1))
-				condition(&prop, cmd.findNode(dst).condition.getString(scope))
+				condition(&prop, past(node.condition.getStream(scope), 1))
+				condition(&prop, cmd.findNode(dst).condition.getStream(scope))
 				condition(&prop, past(cmd.invariants[node.invariant], 1))
 				subGroup.appendProp(prop)
 			}
@@ -481,12 +484,12 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 			backwardStr := past(unionNodeConds(incomingNodes), 1)
 
 			if slices.Contains(cmd.entryNodes, node.name) {
-				backwardStr = disjoin([]string{backwardStr, cmd.entryCondition})
+				backwardStr = disjoin([]TokenStream{backwardStr, cmd.entryCondition})
 			}
 
 			// If my condition is true now, then in the previous cycle one of the conditions of one of the incoming nodes is true
 			prop := NewPropertyFrom(camelCase(node.name)+"_Rev", backwardStr, scope)
-			prop.condition(node.condition.getString(scope))
+			prop.condition(node.condition.getStream(scope))
 			subGroup.appendProp(prop)
 		}
 

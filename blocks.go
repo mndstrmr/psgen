@@ -22,24 +22,24 @@ func (word *WordArg) toString() string {
 func (word *WordArg) toVerbatimOrState() VerbatimOrState {
 	return VerbatimOrState{
 		label:    word.label,
-		str:      word.word,
+		state:    word.word,
 		verbatim: false,
 	}
 }
 
 type VerbatimCommandArg struct {
-	label   string
-	content string
+	label  string
+	stream TokenStream
 }
 
 func (verbatim *VerbatimCommandArg) toString() string {
-	return "[[" + verbatim.content + "]]"
+	return "[[" + "]]"
 }
 
 func (verbatim *VerbatimCommandArg) toVerbatimOrState() VerbatimOrState {
 	return VerbatimOrState{
 		label:    verbatim.label,
-		str:      verbatim.content,
+		stream:   verbatim.stream,
 		verbatim: true,
 	}
 }
@@ -86,13 +86,13 @@ func (cmd *Command) wordArg(i int) string {
 	return word.word
 }
 
-func (cmd *Command) verbatimArg(i int) string {
+func (cmd *Command) verbatimArg(i int) TokenStream {
 	verbatim, ok := cmd.arg(i).(*VerbatimCommandArg)
 	if !ok {
 		panic(fmt.Errorf("malformed argument, expecting verbatim at index %d to %s", i, cmd.operator))
 	}
 
-	return verbatim.content
+	return verbatim.stream
 }
 
 func (cmd *Command) verbatimOrStateArg(i int) VerbatimOrState {
@@ -153,9 +153,13 @@ func parseArg(str string) (string, CommandArg) {
 		if depth != 1 || str[i] != ')' {
 			panic(fmt.Errorf("unclosed verbatim"))
 		}
+		s, toks := tokenize(str[start:i])
+		if s != "" {
+			panic(fmt.Errorf("failed to parse systemverilog"))
+		}
 		return str[i+1:], &VerbatimCommandArg{
-			label:   label,
-			content: str[start:i],
+			label:  label,
+			stream: toks,
 		}
 	}
 

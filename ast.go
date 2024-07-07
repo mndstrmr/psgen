@@ -6,21 +6,22 @@ import (
 )
 
 type LocalScope struct {
-	states     map[string]string
-	conditions []string
+	states     map[string]TokenStream
+	conditions []TokenStream
 }
 
 type VerbatimOrState struct {
 	label    string
-	str      string
+	state    string
+	stream   TokenStream
 	verbatim bool
 }
 
-func (vos *VerbatimOrState) getString(scope *Scope) string {
+func (vos *VerbatimOrState) getStream(scope *Scope) TokenStream {
 	if vos.verbatim {
-		return vos.str
+		return vos.stream
 	} else {
-		return scope.getState(vos.str)
+		return scope.getState(vos.state)
 	}
 }
 
@@ -46,7 +47,7 @@ type BlockProofCommand struct {
 
 type HaveProofCommand struct {
 	label     string
-	condition string
+	condition TokenStream
 	helper    ProofHelper
 }
 
@@ -93,8 +94,8 @@ type GraphInductionNodeDefinition struct {
 type GraphInductionProofHelper struct {
 	label          string
 	backward       bool
-	invariants     map[string]string
-	entryCondition string
+	invariants     map[string]TokenStream
+	entryCondition TokenStream
 	entryNodes     []string
 	nodes          []GraphInductionNodeDefinition
 	scope          LocalScope
@@ -198,13 +199,13 @@ func blocksToGraphInduction(root Block) GraphInductionProofHelper {
 	cmd := GraphInductionProofHelper{
 		label:          root.first.label,
 		backward:       root.first.hasFlag("rev"),
-		invariants:     make(map[string]string, 0),
-		entryCondition: "",
+		invariants:     make(map[string]TokenStream, 0),
+		entryCondition: nil,
 		entryNodes:     make([]string, 0),
 		nodes:          make([]GraphInductionNodeDefinition, 0),
 		scope: LocalScope{
-			states:     make(map[string]string, 0),
-			conditions: make([]string, 0),
+			states:     make(map[string]TokenStream, 0),
+			conditions: make([]TokenStream, 0),
 		},
 	}
 	for _, block := range root.body {
@@ -237,8 +238,8 @@ func blocksToGraphInduction(root Block) GraphInductionProofHelper {
 func blocksToSequenceProof(blocks []Block) SequencedProofSteps {
 	seq := SequencedProofSteps{
 		scope: LocalScope{
-			states:     make(map[string]string, 0),
-			conditions: make([]string, 0),
+			states:     make(map[string]TokenStream, 0),
+			conditions: make([]TokenStream, 0),
 		},
 		sequence: make([][]ProofCommand, 1),
 	}
