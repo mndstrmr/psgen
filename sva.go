@@ -210,11 +210,11 @@ func tokenize(str string) (string, TokenStream) {
 			break
 		}
 
-		if idx := strings.IndexAny(string(str[0]), "([{"); idx >= 0 {
+		if idx := strings.IndexAny("([{", string(str[0])); idx >= 0 {
 			newStr, content := tokenize(str[1:])
 			str = newStr
 			if str[0] != ")]}"[idx] {
-				print(fmt.Errorf("malformed SystemVerilog, expected %c found %c", ")]}"[idx], str[0]))
+				panic(fmt.Errorf("malformed SystemVerilog, expected %c found %c", ")]}"[idx], str[0]))
 			}
 			str = str[1:]
 			stream = append(stream, &BracketedToken{
@@ -241,6 +241,7 @@ func tokenize(str string) (string, TokenStream) {
 			newStr, tok := tokenizeNum(str)
 			str = newStr
 			stream = append(stream, &tok)
+			continue
 		}
 
 		end := 1
@@ -666,8 +667,7 @@ func (seq *FlatProofSequence) toSva(slice int, lineWidth int) string {
 }
 
 func (seq *FlatProofSequence) toTasks() string {
-	cmds := "proc enter_stopat {} { stopat -reset {*} }\n" +
-		"proc exit_stopat {} { stopat -reset -clear }\n"
+	cmds := ""
 
 	for i := range seq.props {
 		prop_names := ""
