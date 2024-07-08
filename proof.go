@@ -262,7 +262,10 @@ type HelpProperty interface {
 	helpProperty(scope *Scope, prop Provable) Provable
 }
 
-func (cmd *NullProofHelpher) helpProperty(scope *Scope, prop Provable) Provable {
+func (cmd *SequenceProofHelper) helpProperty(scope *Scope, prop Provable) Provable {
+	for _, helper := range cmd.helpers {
+		prop = helper.helpProperty(scope, prop)
+	}
 	return prop
 }
 
@@ -271,18 +274,18 @@ func (cmd *KInductionProofHelper) helpProperty(scope *Scope, prop Provable) Prov
 	for k := 1; k <= cmd.k; k++ {
 		copy := prop.copy()
 		copy.walkProps(func(prop *Property) {
-			if prop.step != "|->" {
-				panic("blocking arrow in k induction property")
-			}
-
 			prop.prefix(strconv.Itoa(k) + "Ind")
 
-			step := "(" + conjoin(prop.preConditions) + ") -> (" + prop.postCondition + ")"
-			prop.preConditions = []string{}
-			prop.postCondition = step
-			for i := 1; i <= k; i++ {
-				prop.preConditions = append(prop.preConditions, past(step, i))
-			}
+			// FIXME: Technically the below would be k-induction, but it seems less useful for our purposes I guess
+			// if prop.step != "|->" {
+			// 	panic("blocking arrow in k induction property")
+			// }
+			// step := "(" + conjoin(prop.preConditions) + ") -> (" + prop.postCondition + ")"
+			// prop.preConditions = []string{}
+			// prop.postCondition = step
+			// for i := 1; i <= k; i++ {
+			// 	prop.preConditions = append(prop.preConditions, past(step, i))
+			// }
 			prop.wait = k
 		})
 		group.append(copy)
@@ -427,19 +430,22 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 	}
 
 	if len(cmd.entryNodes) > 0 {
+		entryGroup := NewProvableGroup()
 		// Base cases:
 		// Check that the entry condition implies one of the entry nodes are active
 		prop := NewPropertyFrom("Initial", unionNodeConds(cmd.entryNodes), scope)
 		prop.condition(cmd.entryCondition)
-		group.appendProp(prop)
+		entryGroup.appendProp(prop)
 
 		// Check that whichever entry node we are in, that node's invariant is satisfied
 		for _, node := range cmd.entryNodes {
 			prop := NewPropertyFrom("Initial_"+camelCase(node), cmd.invariants[cmd.findNode(node).invariant], scope)
 			prop.condition(cmd.findNode(node).condition.getString(scope))
 			prop.condition(cmd.entryCondition)
-			group.appendProp(prop)
+			entryGroup.appendProp(prop)
 		}
+
+		group.append(cmd.entryHelper.helpProperty(scope, &entryGroup))
 	}
 
 	// Inductive steps:

@@ -82,6 +82,14 @@ type KInductionProofHelper struct {
 	wireSets []string
 }
 
+type SequenceProofHelper struct {
+	helpers []ProofHelper
+}
+
+func NopProofHelper() ProofHelper {
+	return &SequenceProofHelper{helpers: []ProofHelper{}}
+}
+
 type GraphInductionNodeDefinition struct {
 	name      string
 	invariant string
@@ -96,6 +104,7 @@ type GraphInductionProofHelper struct {
 	invariants     map[string]string
 	entryCondition string
 	entryNodes     []string
+	entryHelper    HelpProperty
 	nodes          []GraphInductionNodeDefinition
 	scope          LocalScope
 }
@@ -130,67 +139,69 @@ type ProofDocument struct {
 }
 
 func blocksToProofHelper(blocks []Block) ProofHelper {
-	if len(blocks) == 0 {
-		return &NullProofHelpher{}
-	}
+	helpers := []ProofHelper{}
 
-	if len(blocks) > 1 {
-		panic("multi step proof helper not supported")
-	}
-
-	switch blocks[0].first.operator {
-	case "split_bool":
-		pivots := make([]VerbatimOrState, 0)
-		for _, arg := range blocks[0].first.inlineArgs {
-			pivots = append(pivots, arg.toVerbatimOrState())
-		}
-		return &SplitBoolProofHelper{
-			pivots: pivots,
-			helper: blocksToProofHelper(blocks[0].body),
-		}
-	case "split":
-		cases := make([]SplitProofCase, 0)
-
-		for _, arg := range blocks[0].first.inlineArgs {
-			cases = append(cases, SplitProofCase{
-				label:     "",
-				condition: arg.toVerbatimOrState(),
-				helper:    &NullProofHelpher{},
-			})
-		}
-
-		for _, block := range blocks[0].body {
-			if block.first.operator != "case" {
-				panic("non case command in split")
+	for _, block := range blocks {
+		switch block.first.operator {
+		case "split_bool":
+			pivots := make([]VerbatimOrState, 0)
+			for _, arg := range block.first.inlineArgs {
+				pivots = append(pivots, arg.toVerbatimOrState())
 			}
-			block.first.fixArgs(1)
-			cases = append(cases, SplitProofCase{
-				label:     block.first.label,
-				condition: block.first.verbatimOrStateArg(0),
-				helper:    blocksToProofHelper(block.body),
+			helpers = append(helpers, &SplitBoolProofHelper{
+				pivots: pivots,
+				helper: blocksToProofHelper(block.body),
 			})
-		}
+		case "split":
+			cases := make([]SplitProofCase, 0)
 
-		return &SplitProofHelper{
-			cases: cases,
+			for _, arg := range block.first.inlineArgs {
+				cases = append(cases, SplitProofCase{
+					label:     "",
+					condition: arg.toVerbatimOrState(),
+					helper:    NopProofHelper(),
+				})
+			}
+
+			for _, block := range block.body {
+				if block.first.operator != "case" {
+					panic("non case command in split")
+				}
+				block.first.fixArgs(1)
+				cases = append(cases, SplitProofCase{
+					label:     block.first.label,
+					condition: block.first.verbatimOrStateArg(0),
+					helper:    blocksToProofHelper(block.body),
+				})
+			}
+
+			helpers = append(helpers, &SplitProofHelper{
+				cases: cases,
+			})
+		case "k_induction":
+			block.first.fixArgs(1)
+			k, err := strconv.Atoi(block.first.wordArg(0))
+			if err != nil {
+				panic(fmt.Errorf("expected an integer for k"))
+			}
+			helpers = append(helpers, &KInductionProofHelper{
+				label:    block.first.label,
+				k:        k,
+				wireSets: []string{},
+			})
+		case "graph_induction":
+			block.first.fixArgs(0)
+			x := blocksToGraphInduction(block)
+			helpers = append(helpers, &x)
+		default:
+			panic("unknown proof helper " + block.first.operator)
 		}
-	case "k_induction":
-		blocks[0].first.fixArgs(1)
-		k, err := strconv.Atoi(blocks[0].first.wordArg(0))
-		if err != nil {
-			panic(fmt.Errorf("expected an integer for k"))
-		}
-		return &KInductionProofHelper{
-			label:    blocks[0].first.label,
-			k:        k,
-			wireSets: []string{},
-		}
-	case "graph_induction":
-		blocks[0].first.fixArgs(0)
-		x := blocksToGraphInduction(blocks[0])
-		return &x
-	default:
-		panic("unknown proof helper " + blocks[0].first.operator)
+	}
+
+	if len(helpers) == 1 {
+		return helpers[0]
+	} else {
+		return &SequenceProofHelper{helpers}
 	}
 }
 
@@ -201,6 +212,7 @@ func blocksToGraphInduction(root Block) GraphInductionProofHelper {
 		invariants:     make(map[string]string, 0),
 		entryCondition: "",
 		entryNodes:     make([]string, 0),
+		entryHelper:    NopProofHelper(),
 		nodes:          make([]GraphInductionNodeDefinition, 0),
 		scope: LocalScope{
 			states:     make(map[string]string, 0),
@@ -216,6 +228,7 @@ func blocksToGraphInduction(root Block) GraphInductionProofHelper {
 			block.first.fixArgs(1)
 			cmd.entryCondition = block.first.verbatimArg(0)
 			cmd.entryNodes = append(cmd.entryNodes, block.first.nowWordArray()...)
+			cmd.entryHelper = blocksToProofHelper(block.body)
 		case "node":
 			block.first.fixArgs(3)
 			node := GraphInductionNodeDefinition{

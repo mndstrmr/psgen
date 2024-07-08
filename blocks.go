@@ -150,7 +150,7 @@ func parseArg(str string) (string, CommandArg) {
 			}
 			i += 1
 		}
-		if depth != 1 || str[i] != ')' {
+		if depth != 1 || i >= len(str) || str[i] != ')' {
 			panic(fmt.Errorf("unclosed verbatim"))
 		}
 		return str[i+1:], &VerbatimCommandArg{
@@ -244,15 +244,15 @@ func parseBlocks(lines []string, parentDepth int) (int, []Block) {
 	for l < len(lines) {
 		line := lines[l]
 
-		preComment := strings.SplitN(line, "#", 2)
+		preComment := strings.SplitN(line, "# ", 2)
 		if len(preComment) > 1 {
-			line = preComment[1]
+			line = preComment[0]
 		}
 
 		lineDepth := lineDepth(line)
 		line = strings.Trim(line, " \t")
 
-		if len(line) == 0 {
+		if len(line) == 0 || line == "#" {
 			l += 1
 			continue
 		}
