@@ -487,7 +487,10 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 					incomingNodes = append(incomingNodes, other.name)
 				}
 			}
-			backwardStr := past(unionNodeConds(incomingNodes), 1)
+			pres := scope.getPreConditions()
+			pres = append(pres, unionNodeConds(incomingNodes))
+			backwardStr := conjoin(pres)
+			backwardStr = past(backwardStr, 1)
 
 			if slices.Contains(cmd.entryNodes, node.name) {
 				backwardStr = disjoin([]TokenStream{backwardStr, cmd.entryCondition})
@@ -502,11 +505,20 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 		group.append(node.helper.helpProperty(scope, &subGroup))
 	}
 
-	scope.pop()
-	if cmd.label != "" {
-		prefix(&group, cmd.label)
+	// Invariant checks
+	checks := NewProvableGroup()
+	for _, node := range cmd.nodes {
+		prop := NewPropertyFrom(camelCase(node.name), cmd.invariants[node.invariant], scope)
+		prop.condition(node.condition.getStream(scope))
+		checks.appendProp(prop)
 	}
-	return &group
+
+	scope.pop()
+	seq := &ProvableSeq{seq: []Provable{&group, &checks}}
+	if cmd.label != "" {
+		prefix(seq, cmd.label)
+	}
+	return seq
 }
 
 func (cmd *GraphInductionProofCommand) genProperty(scope *Scope) Provable {
