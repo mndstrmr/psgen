@@ -5,6 +5,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 type Scope struct {
@@ -79,6 +80,7 @@ func condition(prop Provable, cond TokenStream) {
 }
 
 type FlatProofSequence struct {
+	wires []Wiring
 	props [][]*Property
 }
 
@@ -171,15 +173,26 @@ func (prop *Property) flatten(seq *FlatProofSequence, n int) int {
 	return n
 }
 
+type Wiring struct {
+	name  string
+	value TokenStream
+}
+
 // An unordered set of properties
 type ProvableGroup struct {
+	wires []Wiring
 	props []Provable
 }
 
 func NewProvableGroup() ProvableGroup {
 	return ProvableGroup{
+		wires: []Wiring{},
 		props: make([]Provable, 0),
 	}
+}
+
+func (group *ProvableGroup) appendWire(name string, value TokenStream) {
+	group.wires = append(group.wires, Wiring{name, value})
 }
 
 func (group *ProvableGroup) walkProps(f func(*Property)) {
@@ -201,6 +214,7 @@ func (group *ProvableGroup) append(prop Provable) {
 }
 
 func (group *ProvableGroup) flatten(seq *FlatProofSequence, prev int) int {
+	seq.wires = append(seq.wires, group.wires...)
 	max := prev
 	for _, prop := range group.props {
 		if n := prop.flatten(seq, prev); n > max {
@@ -274,25 +288,23 @@ func (cmd *SequenceProofHelper) helpProperty(scope *Scope, prop Provable) Provab
 
 func (cmd *KInductionProofHelper) helpProperty(scope *Scope, prop Provable) Provable {
 	group := NewProvableGroup()
-	for k := 1; k <= cmd.k; k++ {
-		copy := prop.copy()
-		copy.walkProps(func(prop *Property) {
-			prop.prefix(strconv.Itoa(k) + "Ind")
+	copy := prop.copy()
+	copy.walkProps(func(prop *Property) {
+		prop.prefix(strconv.Itoa(cmd.k) + "Ind")
 
-			// FIXME: Technically the below would be k-induction, but it seems less useful for our purposes I guess
-			// if prop.step != "|->" {
-			// 	panic("blocking arrow in k induction property")
-			// }
-			// step := "(" + conjoin(prop.preConditions) + ") -> (" + prop.postCondition + ")"
-			// prop.preConditions = []string{}
-			// prop.postCondition = step
-			// for i := 1; i <= k; i++ {
-			// 	prop.preConditions = append(prop.preConditions, past(step, i))
-			// }
-			prop.wait = k
-		})
-		group.append(copy)
-	}
+		// FIXME: Technically the below would be k-induction, but it seems less useful for our purposes I guess
+		// if prop.step != "|->" {
+		// 	panic("blocking arrow in k induction property")
+		// }
+		// step := "(" + conjoin(prop.preConditions) + ") -> (" + prop.postCondition + ")"
+		// prop.preConditions = []string{}
+		// prop.postCondition = step
+		// for i := 1; i <= k; i++ {
+		// 	prop.preConditions = append(prop.preConditions, past(step, i))
+		// }
+		prop.wait = cmd.k
+	})
+	group.append(copy)
 	group.append(prop)
 	return &group
 }
@@ -322,6 +334,9 @@ func (cmd *SplitProofHelper) helpProperty(scope *Scope, prop Provable) Provable 
 		group.append(new)
 	}
 
+	if !cmd.check {
+		return &group
+	}
 	return &ProvableSeq{
 		seq: []Provable{&group, prop},
 	}
@@ -424,27 +439,52 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 	scope.push(&cmd.scope)
 	group := NewProvableGroup()
 
+	namePrefix := ""
+	if cmd.label != "" {
+		namePrefix = strings.ToLower(cmd.label) + "_"
+	}
+
+	group.appendWire(namePrefix+"pre", conjoin(scope.getPreConditions()))
+
+	for _, node := range cmd.nodes {
+		group.appendWire(namePrefix+node.name, node.condition.getStream(scope))
+		group.appendWire(namePrefix+node.name+"_inv", cmd.invariants[node.invariant])
+	}
+
+	invariant := func(node string) TokenStream {
+		return TokenStream{&NameToken{content: namePrefix + node + "_inv"}}
+	}
+	cond := func(node string) TokenStream {
+		return TokenStream{&NameToken{content: namePrefix + node}}
+	}
+
 	unionNodeConds := func(nodes []string) TokenStream {
-		conds := []TokenStream{}
-		for _, node := range nodes {
-			conds = append(conds, cmd.findNode(node).condition.getStream(scope))
+		conds := TokenStream{}
+		for i, node := range nodes {
+			if i != 0 {
+				conds = append(conds, &WhiteSpaceToken{})
+				conds = append(conds, &OperatorToken{operator: "||"})
+				conds = append(conds, &WhiteSpaceToken{})
+			}
+			conds = append(conds, cond(node)...)
 		}
-		return disjoin(conds)
+		return conds
 	}
 
 	if len(cmd.entryNodes) > 0 {
 		entryGroup := NewProvableGroup()
+		group.appendWire(namePrefix+"initial", cmd.entryCondition)
 		// Base cases:
 		// Check that the entry condition implies one of the entry nodes are active
 		prop := NewPropertyFrom("Initial", unionNodeConds(cmd.entryNodes), scope)
-		prop.condition(cmd.entryCondition)
+		prop.condition(cond("initial"))
 		entryGroup.appendProp(prop)
 
 		// Check that whichever entry node we are in, that node's invariant is satisfied
 		for _, node := range cmd.entryNodes {
-			prop := NewPropertyFrom("Initial_"+camelCase(node), cmd.invariants[cmd.findNode(node).invariant], scope)
-			prop.condition(cmd.findNode(node).condition.getStream(scope))
-			prop.condition(cmd.entryCondition)
+			prop := NewPropertyFrom("Initial_"+camelCase(node), invariant(node), scope)
+			prop.condition(cond(node))
+			prop.condition(cond("initial"))
 			entryGroup.appendProp(prop)
 		}
 
@@ -456,25 +496,27 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 		subGroup := NewProvableGroup()
 
 		if len(node.nextNodes) != 0 {
-			// The condition for one of my outgoing nodes is met in the next cycle, unless we leave the domain of the graph altogether
-			nexts := unionNodeConds(node.nextNodes)
-			negPre := []TokenStream{nexts}
-			for _, pre := range scope.getPreConditions() {
-				negPre = append(negPre, negate(pre))
-			}
-			nexts = disjoin(negPre)
+			// The condition for one of my outgoing nodes is met in the next cycle, unless we leave the domain of the graph altogether.
+			// If it's an exit node we don't have a step check.
 
-			prop := NewPropertyFrom(camelCase(node.name)+"_Step", nexts, scope)
-			prop.step = "|=>"
-			prop.condition(node.condition.getStream(scope))
-			subGroup.appendProp(prop)
+			if !node.exit {
+				nexts := unionNodeConds(node.nextNodes)
+				negPre := []TokenStream{nexts, negate(cond("pre"))}
+				nexts = disjoin(negPre)
+
+				prop := NewPropertyFrom(camelCase(node.name)+"_Step", nexts, scope)
+				prop.step = "|=>"
+				prop.condition(invariant(node.name))
+				prop.condition(cond(node.name))
+				subGroup.appendProp(prop)
+			}
 
 			for _, dst := range node.nextNodes {
 				// If last cycle I was active and this cycle you are active, then my invariant being true last cycle implies your invariant is true this cycle
-				prop := NewPropertyFrom(camelCase(node.name)+"_"+camelCase(dst)+"_Inv", cmd.invariants[cmd.findNode(dst).invariant], scope)
-				condition(&prop, past(node.condition.getStream(scope), 1))
-				condition(&prop, cmd.findNode(dst).condition.getStream(scope))
-				condition(&prop, past(cmd.invariants[node.invariant], 1))
+				prop := NewPropertyFrom(camelCase(node.name)+"_"+camelCase(dst)+"_Inv", invariant(dst), scope)
+				prop.condition(past(cond(node.name), 1))
+				prop.condition(cond(dst))
+				prop.condition(past(invariant(node.name), 1))
 				subGroup.appendProp(prop)
 			}
 		}
@@ -487,34 +529,54 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 					incomingNodes = append(incomingNodes, other.name)
 				}
 			}
-			pres := scope.getPreConditions()
-			pres = append(pres, unionNodeConds(incomingNodes))
-			backwardStr := conjoin(pres)
+			backwardStr := conjoin([]TokenStream{unionNodeConds(incomingNodes), cond("pre")})
 			backwardStr = past(backwardStr, 1)
 
 			if slices.Contains(cmd.entryNodes, node.name) {
-				backwardStr = disjoin([]TokenStream{backwardStr, cmd.entryCondition})
+				backwardStr = disjoin([]TokenStream{backwardStr, cond("initial")})
 			}
 
 			// If my condition is true now, then in the previous cycle one of the conditions of one of the incoming nodes is true
 			prop := NewPropertyFrom(camelCase(node.name)+"_Rev", backwardStr, scope)
-			prop.condition(node.condition.getStream(scope))
+			prop.condition(cond(node.name))
 			subGroup.appendProp(prop)
 		}
 
 		group.append(node.helper.helpProperty(scope, &subGroup))
 	}
 
+	sequence := []Provable{}
+
+	if cmd.complete || cmd.onehot {
+		allNodes := []TokenStream{}
+		for _, node := range cmd.nodes {
+			allNodes = append(allNodes, cond(node.name))
+		}
+		var cond TokenStream
+		if cmd.onehot && cmd.complete {
+			cond = onehot(allNodes)
+		} else if cmd.complete {
+			cond = disjoin(allNodes)
+		} else if cmd.onehot {
+			cond = onehot0(allNodes)
+		}
+		completeness := NewPropertyFrom("Complete", cond, scope)
+		sequence = append(sequence, &completeness)
+	}
+
+	sequence = append(sequence, &group)
+
 	// Invariant checks
 	checks := NewProvableGroup()
 	for _, node := range cmd.nodes {
-		prop := NewPropertyFrom(camelCase(node.name), cmd.invariants[node.invariant], scope)
-		prop.condition(node.condition.getStream(scope))
+		prop := NewPropertyFrom(camelCase(node.name), invariant(node.name), scope)
+		prop.condition(cond(node.name))
 		checks.appendProp(prop)
 	}
+	sequence = append(sequence, &checks)
 
 	scope.pop()
-	seq := &ProvableSeq{seq: []Provable{&group, &checks}}
+	seq := &ProvableSeq{seq: sequence}
 	if cmd.label != "" {
 		prefix(seq, cmd.label)
 	}

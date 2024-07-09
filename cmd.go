@@ -68,6 +68,7 @@ func main() {
 	}
 	prop := lemma.genProperty(&scope)
 	seq := FlatProofSequence{
+		wires: []Wiring{},
 		props: make([][]*Property, 0),
 	}
 	prop.flatten(&seq, 0)

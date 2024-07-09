@@ -69,6 +69,7 @@ type SplitProofCase struct {
 }
 
 type SplitProofHelper struct {
+	check bool
 	cases []SplitProofCase
 }
 
@@ -92,6 +93,7 @@ func NopProofHelper() ProofHelper {
 }
 
 type GraphInductionNodeDefinition struct {
+	exit      bool
 	name      string
 	invariant string
 	condition VerbatimOrState
@@ -102,21 +104,14 @@ type GraphInductionNodeDefinition struct {
 type GraphInductionProofHelper struct {
 	label          string
 	backward       bool
+	complete       bool
+	onehot         bool
 	invariants     map[string]TokenStream
 	entryCondition TokenStream
 	entryNodes     []string
 	entryHelper    HelpProperty
 	nodes          []GraphInductionNodeDefinition
 	scope          LocalScope
-}
-
-func (helper *GraphInductionProofHelper) findNode(name string) *GraphInductionNodeDefinition {
-	for _, node := range helper.nodes {
-		if node.name == name {
-			return &node
-		}
-	}
-	panic(fmt.Errorf("no node with name %s", name))
 }
 
 type GraphInductionProofCommand struct {
@@ -177,6 +172,7 @@ func blocksToProofHelper(blocks []Block) ProofHelper {
 			}
 
 			helpers = append(helpers, &SplitProofHelper{
+				check: !block.first.hasFlag("nocheck"),
 				cases: cases,
 			})
 		case "k_induction":
@@ -210,6 +206,8 @@ func blocksToGraphInduction(root Block) GraphInductionProofHelper {
 	cmd := GraphInductionProofHelper{
 		label:          root.first.label,
 		backward:       root.first.hasFlag("rev"),
+		complete:       root.first.hasFlag("complete"),
+		onehot:         root.first.hasFlag("onehot"),
 		invariants:     make(map[string]TokenStream, 0),
 		entryCondition: nil,
 		entryNodes:     make([]string, 0),
@@ -233,6 +231,7 @@ func blocksToGraphInduction(root Block) GraphInductionProofHelper {
 		case "node":
 			block.first.fixArgs(3)
 			node := GraphInductionNodeDefinition{
+				exit:      block.first.hasFlag("exit"),
 				name:      block.first.wordArg(0),
 				invariant: block.first.wordArg(1),
 				condition: block.first.verbatimOrStateArg(2),

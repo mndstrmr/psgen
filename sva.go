@@ -333,11 +333,59 @@ func isDisjunction(stream TokenStream) bool {
 	return true
 }
 
+func isWhitespaceTerm(stream TokenStream) bool {
+	for _, token := range stream {
+		if _, ok := token.(*WhiteSpaceToken); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func comma(terms []TokenStream) TokenStream {
+	newStream := TokenStream{}
+	for i, term := range terms {
+		if i != 0 {
+			newStream = append(newStream, &OperatorToken{operator: ","}, &WhiteSpaceToken{})
+		}
+		newStream = append(newStream, term...)
+	}
+	return newStream
+}
+
+func vector(bits []TokenStream) TokenStream {
+	return TokenStream{
+		&BracketedToken{
+			openBracket:  '{',
+			closeBracket: '}',
+			content:      comma(bits),
+		},
+	}
+}
+
+func onehot(terms []TokenStream) TokenStream {
+	return TokenStream{
+		&NameToken{"$onehot"},
+		paren(vector(terms)),
+	}
+}
+
+func onehot0(terms []TokenStream) TokenStream {
+	return TokenStream{
+		&NameToken{"$onehot0"},
+		paren(vector(terms)),
+	}
+}
+
 func conjoin(terms []TokenStream) TokenStream {
 	newStream := TokenStream{}
 
-	for i, term := range terms {
-		if i != 0 {
+	for _, term := range terms {
+		if isWhitespaceTerm(term) {
+			continue
+		}
+
+		if len(newStream) != 0 {
 			newStream = append(newStream, &WhiteSpaceToken{})
 			newStream = append(newStream, &OperatorToken{
 				operator: "&&",
@@ -351,14 +399,22 @@ func conjoin(terms []TokenStream) TokenStream {
 		}
 	}
 
+	if len(newStream) == 0 {
+		newStream = append(newStream, &NumToken{num: "1"})
+	}
+
 	return newStream
 }
 
 func disjoin(terms []TokenStream) TokenStream {
 	newStream := TokenStream{}
 
-	for i, term := range terms {
-		if i != 0 {
+	for _, term := range terms {
+		if isWhitespaceTerm(term) {
+			continue
+		}
+
+		if len(newStream) != 0 {
 			newStream = append(newStream, &WhiteSpaceToken{})
 			newStream = append(newStream, &OperatorToken{
 				operator: "||",
@@ -370,6 +426,10 @@ func disjoin(terms []TokenStream) TokenStream {
 		} else {
 			newStream = append(newStream, term...)
 		}
+	}
+
+	if len(newStream) == 0 {
+		newStream = append(newStream, &NumToken{num: "0"})
 	}
 
 	return newStream
@@ -649,8 +709,21 @@ func (prop *Property) toSva(assume bool, lineWidth int) string {
 	}, lineWidth)
 }
 
+func (wire *Wiring) toSva(lineWidth int) string {
+	unsplittableStart := "assign " + wire.name + " = "
+	stream := TokenStream{}
+	stream = append(stream, &NameToken{content: unsplittableStart})
+	stream = append(stream, wire.value...)
+	stream = append(stream, &OperatorToken{operator: ";"})
+	return formatStream(stream, lineWidth)
+}
+
 func (seq *FlatProofSequence) toSva(slice int, lineWidth int) string {
 	sva := ""
+
+	for _, wire := range seq.wires {
+		sva += wire.toSva(lineWidth) + "\n"
+	}
 
 	for i, step := range seq.props {
 		if slice != -1 && i > slice {
