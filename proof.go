@@ -521,27 +521,6 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 			}
 		}
 
-		if cmd.backward {
-			// Reverse inductive step path
-			incomingNodes := []string{}
-			for _, other := range cmd.nodes {
-				if slices.Contains(other.nextNodes, node.name) {
-					incomingNodes = append(incomingNodes, other.name)
-				}
-			}
-			backwardStr := conjoin([]TokenStream{unionNodeConds(incomingNodes), cond("pre")})
-			backwardStr = past(backwardStr, 1)
-
-			if slices.Contains(cmd.entryNodes, node.name) {
-				backwardStr = disjoin([]TokenStream{backwardStr, cond("initial")})
-			}
-
-			// If my condition is true now, then in the previous cycle one of the conditions of one of the incoming nodes is true
-			prop := NewPropertyFrom(camelCase(node.name)+"_Rev", backwardStr, scope)
-			prop.condition(cond(node.name))
-			subGroup.appendProp(prop)
-		}
-
 		group.append(node.helper.helpProperty(scope, &subGroup))
 	}
 
@@ -565,6 +544,32 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 	}
 
 	sequence = append(sequence, &group)
+
+	// Reverse inductive step path. If the above _Step conditions all hold, the precondition is always true, and there is no entry/exit then these follow
+	if cmd.backward {
+		subGroup := NewProvableGroup()
+
+		for _, node := range cmd.nodes {
+			incomingNodes := []string{}
+			for _, other := range cmd.nodes {
+				if slices.Contains(other.nextNodes, node.name) {
+					incomingNodes = append(incomingNodes, other.name)
+				}
+			}
+			backwardStr := conjoin([]TokenStream{unionNodeConds(incomingNodes), cond("pre")})
+			backwardStr = past(backwardStr, 1)
+
+			if slices.Contains(cmd.entryNodes, node.name) {
+				backwardStr = disjoin([]TokenStream{backwardStr, cond("initial")})
+			}
+
+			// If my condition is true now, then in the previous cycle one of the conditions of one of the incoming nodes is true
+			prop := NewPropertyFrom(camelCase(node.name)+"_Rev", backwardStr, scope)
+			prop.condition(cond(node.name))
+			subGroup.append(node.helper.helpProperty(scope, &prop))
+		}
+		sequence = append(sequence, &subGroup)
+	}
 
 	// Invariant checks
 	checks := NewProvableGroup()
