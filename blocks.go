@@ -241,6 +241,18 @@ func lineDepth(line string) int {
 	return -1
 }
 
+func parenParenNestingDepth(str string) int {
+	depth := 0
+	for _, chr := range str {
+		if chr == '(' {
+			depth += 1
+		} else if chr == ')' {
+			depth -= 1
+		}
+	}
+	return depth
+}
+
 func parseBlocks(lines []string, parentDepth int) (int, []Block) {
 	blocks := make([]Block, 0)
 	l := 0
@@ -277,7 +289,7 @@ func parseBlocks(lines []string, parentDepth int) (int, []Block) {
 			if strings.HasSuffix(line, "\\") {
 				l += 1
 				line = line[:len(line)-1] + strings.Trim(lines[l], " \t")
-			} else if strings.HasSuffix(line, ":") {
+			} else if strings.HasSuffix(line, ":") || parenParenNestingDepth(line) > 0 {
 				l += 1
 				line = line + strings.Trim(lines[l], " \t")
 			} else {

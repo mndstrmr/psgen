@@ -435,6 +435,21 @@ func (cmd *UseProofCommand) genProperty(scope *Scope) Provable {
 	return cmd.helper.helpProperty(scope, prop_seq.genProperty(scope))
 }
 
+func graphPaths(cmd *GraphInductionProofHelper, path []string, f func([]string, bool)) []string {
+	node := path[len(path)-1]
+	path = append(path, "")
+	for _, step := range cmd.nodes[node].stepTransitions {
+		path[len(path)-1] = step
+		f(path, true)
+	}
+	for _, step := range cmd.nodes[node].epsTransitions {
+		path[len(path)-1] = step
+		f(path, false)
+		path = graphPaths(cmd, path, f)
+	}
+	return slices.Delete(path, len(path)-1, len(path))
+}
+
 func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 	scope.push(&cmd.scope)
 	group := NewProvableGroup()
@@ -446,9 +461,13 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 
 	group.appendWire(namePrefix+"pre", conjoin(scope.getPreConditions()))
 
-	for _, node := range cmd.nodes {
-		group.appendWire(namePrefix+node.name, node.condition.getStream(scope))
-		group.appendWire(namePrefix+node.name+"_inv", cmd.invariants[node.invariant])
+	for name, node := range cmd.nodes {
+		group.appendWire(namePrefix+name, node.condition.getStream(scope))
+		if node.invariant.verbatim {
+			group.appendWire(namePrefix+name+"_inv", node.invariant.stream)
+		} else {
+			group.appendWire(namePrefix+name+"_inv", cmd.invariants[node.invariant.state])
+		}
 	}
 
 	invariant := func(node string) TokenStream {
@@ -459,6 +478,10 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 	}
 
 	unionNodeConds := func(nodes []string) TokenStream {
+		if len(nodes) == 0 {
+			return TokenStream{&NumToken{"0"}}
+		}
+
 		conds := TokenStream{}
 		for i, node := range nodes {
 			if i != 0 {
@@ -492,31 +515,44 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 	}
 
 	// Inductive steps:
-	for _, node := range cmd.nodes {
+	for name, node := range cmd.nodes {
 		subGroup := NewProvableGroup()
 
-		if len(node.nextNodes) != 0 {
+		if len(node.stepTransitions) != 0 || len(node.epsTransitions) != 0 {
 			// The condition for one of my outgoing nodes is met in the next cycle, unless we leave the domain of the graph altogether.
 			// If it's an exit node we don't have a step check.
 
 			if !node.exit {
-				nexts := unionNodeConds(node.nextNodes)
+				nexts := unionNodeConds(node.stepTransitions)
 				negPre := []TokenStream{nexts, negate(cond("pre"))}
-				nexts = disjoin(negPre)
 
-				prop := NewPropertyFrom(camelCase(node.name)+"_Step", nexts, scope)
-				prop.step = "|=>"
-				prop.condition(invariant(node.name))
-				prop.condition(cond(node.name))
+				currs := TokenStream{
+					paren(unionNodeConds(node.epsTransitions)),
+					&WhiteSpaceToken{}, &OperatorToken{operator: "or"}, &WhiteSpaceToken{}, &OperatorToken{operator: "##1"}, &WhiteSpaceToken{},
+					paren(disjoin(negPre)),
+				}
+
+				prop := NewPropertyFrom(camelCase(name)+"_Step", currs, scope)
+				prop.condition(invariant(name))
+				prop.condition(cond(name))
 				subGroup.appendProp(prop)
 			}
 
-			for _, dst := range node.nextNodes {
+			for _, dst := range node.stepTransitions {
 				// If last cycle I was active and this cycle you are active, then my invariant being true last cycle implies your invariant is true this cycle
-				prop := NewPropertyFrom(camelCase(node.name)+"_"+camelCase(dst)+"_Inv", invariant(dst), scope)
-				prop.condition(past(cond(node.name), 1))
+				prop := NewPropertyFrom(camelCase(name)+"_"+camelCase(dst)+"_Inv", invariant(dst), scope)
+				prop.condition(past(cond(name), 1))
 				prop.condition(cond(dst))
-				prop.condition(past(invariant(node.name), 1))
+				prop.condition(past(invariant(name), 1))
+				subGroup.appendProp(prop)
+			}
+
+			for _, dst := range node.epsTransitions {
+				// If this cycle I am active and this cycle you are active, then my invariant being true now implies your invariant is true now
+				prop := NewPropertyFrom(camelCase(name)+"_"+camelCase(dst)+"_Inv", invariant(dst), scope)
+				prop.condition(cond(name))
+				prop.condition(cond(dst))
+				prop.condition(invariant(name))
 				subGroup.appendProp(prop)
 			}
 		}
@@ -528,8 +564,8 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 
 	if cmd.complete || cmd.onehot {
 		allNodes := []TokenStream{}
-		for _, node := range cmd.nodes {
-			allNodes = append(allNodes, cond(node.name))
+		for name := range cmd.nodes {
+			allNodes = append(allNodes, cond(name))
 		}
 		var cond TokenStream
 		if cmd.onehot && cmd.complete {
@@ -549,23 +585,33 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 	if cmd.backward {
 		subGroup := NewProvableGroup()
 
-		for _, node := range cmd.nodes {
-			incomingNodes := []string{}
-			for _, other := range cmd.nodes {
-				if slices.Contains(other.nextNodes, node.name) {
-					incomingNodes = append(incomingNodes, other.name)
+		for name, node := range cmd.nodes {
+			epsIncomingNodes := []string{}
+			stepIncomingNodes := []string{}
+			for otherName, other := range cmd.nodes {
+				if slices.Contains(other.stepTransitions, name) {
+					stepIncomingNodes = append(stepIncomingNodes, otherName)
+				}
+				if slices.Contains(other.epsTransitions, name) {
+					epsIncomingNodes = append(epsIncomingNodes, otherName)
 				}
 			}
-			backwardStr := conjoin([]TokenStream{unionNodeConds(incomingNodes), cond("pre")})
-			backwardStr = past(backwardStr, 1)
 
-			if slices.Contains(cmd.entryNodes, node.name) {
+			backwardStr := unionNodeConds(epsIncomingNodes)
+			if slices.Contains(cmd.entryNodes, name) {
 				backwardStr = disjoin([]TokenStream{backwardStr, cond("initial")})
 			}
 
+			stepBackward := past(conjoin([]TokenStream{unionNodeConds(stepIncomingNodes), cond("pre")}), 1)
+			backwardStr = TokenStream{
+				paren(backwardStr),
+				&WhiteSpaceToken{}, &OperatorToken{operator: "or"}, &WhiteSpaceToken{},
+				paren(stepBackward),
+			}
+
 			// If my condition is true now, then in the previous cycle one of the conditions of one of the incoming nodes is true
-			prop := NewPropertyFrom(camelCase(node.name)+"_Rev", backwardStr, scope)
-			prop.condition(cond(node.name))
+			prop := NewPropertyFrom(camelCase(name)+"_Rev", backwardStr, scope)
+			prop.condition(cond(name))
 			subGroup.append(node.helper.helpProperty(scope, &prop))
 		}
 		sequence = append(sequence, &subGroup)
@@ -573,9 +619,9 @@ func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 
 	// Invariant checks
 	checks := NewProvableGroup()
-	for _, node := range cmd.nodes {
-		prop := NewPropertyFrom(camelCase(node.name), invariant(node.name), scope)
-		prop.condition(cond(node.name))
+	for name := range cmd.nodes {
+		prop := NewPropertyFrom(camelCase(name), invariant(name), scope)
+		prop.condition(cond(name))
 		checks.appendProp(prop)
 	}
 	sequence = append(sequence, &checks)

@@ -93,12 +93,12 @@ func NopProofHelper() ProofHelper {
 }
 
 type GraphInductionNodeDefinition struct {
-	exit      bool
-	name      string
-	invariant string
-	condition VerbatimOrState
-	nextNodes []string
-	helper    ProofHelper
+	exit            bool
+	invariant       VerbatimOrState
+	condition       VerbatimOrState
+	stepTransitions []string
+	epsTransitions  []string
+	helper          ProofHelper
 }
 
 type GraphInductionProofHelper struct {
@@ -110,7 +110,7 @@ type GraphInductionProofHelper struct {
 	entryCondition TokenStream
 	entryNodes     []string
 	entryHelper    HelpProperty
-	nodes          []GraphInductionNodeDefinition
+	nodes          map[string]GraphInductionNodeDefinition
 	scope          LocalScope
 }
 
@@ -212,7 +212,7 @@ func blocksToGraphInduction(root Block) GraphInductionProofHelper {
 		entryCondition: nil,
 		entryNodes:     make([]string, 0),
 		entryHelper:    NopProofHelper(),
-		nodes:          make([]GraphInductionNodeDefinition, 0),
+		nodes:          map[string]GraphInductionNodeDefinition{},
 		scope: LocalScope{
 			states:     make(map[string]TokenStream, 0),
 			conditions: make([]TokenStream, 0),
@@ -230,15 +230,23 @@ func blocksToGraphInduction(root Block) GraphInductionProofHelper {
 			cmd.entryHelper = blocksToProofHelper(block.body)
 		case "node":
 			block.first.fixArgs(3)
-			node := GraphInductionNodeDefinition{
-				exit:      block.first.hasFlag("exit"),
-				name:      block.first.wordArg(0),
-				invariant: block.first.wordArg(1),
-				condition: block.first.verbatimOrStateArg(2),
-				nextNodes: block.first.stepWordArray(),
-				helper:    blocksToProofHelper(block.body),
+			cmd.nodes[block.first.wordArg(0)] = GraphInductionNodeDefinition{
+				exit:            block.first.hasFlag("exit"),
+				invariant:       block.first.verbatimOrStateArg(1),
+				condition:       block.first.verbatimOrStateArg(2),
+				stepTransitions: []string{},
+				helper:          blocksToProofHelper(block.body),
 			}
-			cmd.nodes = append(cmd.nodes, node)
+		case "edge":
+			block.first.fixArgs(1)
+			name := block.first.wordArg(0)
+			node := cmd.nodes[name]
+			if block.first.trailingMode == TRAILING_NOW {
+				node.epsTransitions = append(node.epsTransitions, block.first.nowWordArray()...)
+			} else if block.first.trailingMode == TRAILING_STEP {
+				node.stepTransitions = append(node.stepTransitions, block.first.stepWordArray()...)
+			}
+			cmd.nodes[name] = node
 		case "cond":
 			block.first.fixArgs(1)
 			cmd.scope.conditions = append(cmd.scope.conditions, block.first.verbatimArg(0))
