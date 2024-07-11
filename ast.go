@@ -230,13 +230,19 @@ func blocksToGraphInduction(root Block) GraphInductionProofHelper {
 			cmd.entryHelper = blocksToProofHelper(block.body)
 		case "node":
 			block.first.fixArgs(3)
-			cmd.nodes[block.first.wordArg(0)] = GraphInductionNodeDefinition{
+			node := GraphInductionNodeDefinition{
 				exit:            block.first.hasFlag("exit"),
 				invariant:       block.first.verbatimOrStateArg(1),
 				condition:       block.first.verbatimOrStateArg(2),
 				stepTransitions: []string{},
 				helper:          blocksToProofHelper(block.body),
 			}
+			if block.first.trailingMode == TRAILING_NOW {
+				node.epsTransitions = append(node.epsTransitions, block.first.nowWordArray()...)
+			} else if block.first.trailingMode == TRAILING_STEP {
+				node.stepTransitions = append(node.stepTransitions, block.first.stepWordArray()...)
+			}
+			cmd.nodes[block.first.wordArg(0)] = node
 		case "edge":
 			block.first.fixArgs(1)
 			name := block.first.wordArg(0)
