@@ -435,21 +435,6 @@ func (cmd *UseProofCommand) genProperty(scope *Scope) Provable {
 	return cmd.helper.helpProperty(scope, prop_seq.genProperty(scope))
 }
 
-func graphPaths(cmd *GraphInductionProofHelper, path []string, f func([]string, bool)) []string {
-	node := path[len(path)-1]
-	path = append(path, "")
-	for _, step := range cmd.nodes[node].stepTransitions {
-		path[len(path)-1] = step
-		f(path, true)
-	}
-	for _, step := range cmd.nodes[node].epsTransitions {
-		path[len(path)-1] = step
-		f(path, false)
-		path = graphPaths(cmd, path, f)
-	}
-	return slices.Delete(path, len(path)-1, len(path))
-}
-
 func (cmd *GraphInductionProofHelper) genCommonProperty(scope *Scope) Provable {
 	scope.push(&cmd.scope)
 	group := NewProvableGroup()

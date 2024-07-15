@@ -179,7 +179,7 @@ Now (assuming an entry was given and `+rev`) we can derive that if the condition
 ## K-Induction Debug
 When attempting to determine why a property cannot be proved with k-induction it is useful to have a trace to explain why a given k does not suffice. We can obtain such a property using `k_induction`:
 ```
-k_induction example
+lemma k_induction_example
   have (p)
     k_induction 3
 ```
