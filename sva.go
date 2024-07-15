@@ -743,18 +743,23 @@ func (seq *FlatProofSequence) toTasks() string {
 	cmds := ""
 
 	for i := range seq.props {
+		not_own_props := ""
+		for j := i - 1; j >= 0; j-- {
+			for _, prop := range seq.props[j] {
+				not_own_props += " Step" + strconv.Itoa(i) + "::*." + prop.name
+			}
+		}
+
 		prop_names := ""
-		for _, prev := range seq.props[:i+1] {
-			for _, prop := range prev {
+		for j := i; j >= 0; j-- {
+			for _, prop := range seq.props[j] {
 				prop_names += " *." + prop.name
 			}
 		}
-		pattern := "{" + prop_names[1:] + "}"
-		cmds += "task -create Step" + strconv.Itoa(i) + " -copy_assumes -copy " + pattern + "\n"
-		for _, prev := range seq.props[:i] {
-			for _, prop := range prev {
-				cmds += "assume -from_assert Step" + strconv.Itoa(i) + "::*." + prop.name + "\n"
-			}
+
+		cmds += "task -create Step" + strconv.Itoa(i) + " -copy_assumes -copy {" + prop_names[1:] + "}\n"
+		if not_own_props != "" {
+			cmds += "assume -from_assert {" + not_own_props[1:] + "}\n"
 		}
 	}
 
