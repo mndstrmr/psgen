@@ -29,12 +29,13 @@ type BreakMode struct {
 	prio int
 }
 
+type TokenStream = []Token
+
 type Token interface {
 	breakMode() BreakMode
 	toString() string
+	subs(ident string, new []Token) []Token
 }
-
-type TokenStream = []Token
 
 type NameToken struct {
 	content string
@@ -46,6 +47,14 @@ func (name *NameToken) breakMode() BreakMode {
 
 func (name *NameToken) toString() string {
 	return name.content
+}
+
+func (name *NameToken) subs(ident string, new []Token) []Token {
+	if ident == name.content {
+		return new
+	} else {
+		return []Token{name}
+	}
 }
 
 type NumToken struct {
@@ -60,6 +69,10 @@ func (num *NumToken) toString() string {
 	return num.num
 }
 
+func (num *NumToken) subs(ident string, new []Token) []Token {
+	return []Token{num}
+}
+
 type OperatorToken struct {
 	operator string
 }
@@ -70,7 +83,7 @@ func (op *OperatorToken) breakMode() BreakMode {
 		return BreakMode{loc: BREAK_AROUND, prio: 5}
 	case "&&", "&", "|", "||":
 		return BreakMode{loc: BREAK_AFTER, prio: 4}
-	case "(", ")", ";":
+	case "(", ")", ";", "``", "`":
 		return BreakMode{prio: -1}
 	default:
 		return BreakMode{loc: BREAK_AFTER, prio: 1}
@@ -88,6 +101,10 @@ func (op *OperatorToken) toString() string {
 	}
 }
 
+func (op *OperatorToken) subs(ident string, new []Token) []Token {
+	return []Token{op}
+}
+
 type BracketedToken struct {
 	openBracket  byte
 	closeBracket byte
@@ -102,6 +119,14 @@ func (brack *BracketedToken) toString() string {
 	return string(brack.openBracket) + streamToString(brack.content) + string(brack.closeBracket)
 }
 
+func (brack *BracketedToken) subs(ident string, new []Token) []Token {
+	return []Token{&BracketedToken{
+		openBracket:  brack.openBracket,
+		closeBracket: brack.closeBracket,
+		content:      subsStream(brack.content, ident, new),
+	}}
+}
+
 type WhiteSpaceToken struct{}
 
 func (ws *WhiteSpaceToken) breakMode() BreakMode {
@@ -110,6 +135,10 @@ func (ws *WhiteSpaceToken) breakMode() BreakMode {
 
 func (ws *WhiteSpaceToken) toString() string {
 	return " "
+}
+
+func (ws *WhiteSpaceToken) subs(ident string, new []Token) []Token {
+	return []Token{ws}
 }
 
 func streamToString(stream TokenStream) string {
@@ -129,7 +158,7 @@ func paren(stream TokenStream) Token {
 }
 
 func isIdentStart(c byte) bool {
-	return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_' || c == '$' || c == '`'
+	return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_' || c == '$'
 }
 
 func isNum(c byte) bool {
@@ -246,7 +275,7 @@ func tokenize(str string) (string, TokenStream) {
 
 		end := 1
 		for _, operator := range []string{
-			"|->", "|=>", "&&", "&", "||", "|", "->", "~",
+			"|->", "|=>", "&&", "&", "||", "|", "->", "~", "``", "`",
 		} {
 			if strings.HasPrefix(str, operator) {
 				end = len(operator)
@@ -297,7 +326,7 @@ func isDisjunctionOperator(op string) bool {
 }
 
 func isUnaryOperator(op string) bool {
-	return op == "~" || op == "-"
+	return op == "~" || op == "-" || op == "`"
 }
 
 func isUnary(stream TokenStream) bool {
@@ -485,6 +514,14 @@ func negate(term TokenStream) TokenStream {
 	}
 }
 
+func subsStream(stream TokenStream, ident string, new TokenStream) TokenStream {
+	tokens := TokenStream{}
+	for _, tok := range stream {
+		tokens = append(tokens, tok.subs(ident, new)...)
+	}
+	return tokens
+}
+
 // Every parens is either broken or not
 // Every whitespace is either broken or not
 // Every whitespace has a priority
@@ -626,8 +663,39 @@ func (line *Line) longestParens() int {
 	return longestI
 }
 
+func concatTokens(stream TokenStream) TokenStream {
+	newStream := TokenStream{}
+	for i, tok := range stream {
+		if brack, ok := tok.(*BracketedToken); ok {
+			newStream = append(newStream, &BracketedToken{
+				openBracket:  brack.openBracket,
+				closeBracket: brack.closeBracket,
+				content:      concatTokens(brack.content),
+			})
+			continue
+		}
+
+		if i < 2 {
+			newStream = append(newStream, tok)
+			continue
+		}
+
+		name1, ok1 := newStream[len(newStream)-2].(*NameToken)
+		op, ok2 := newStream[len(newStream)-1].(*OperatorToken)
+		name2, ok3 := tok.(*NameToken)
+		if !ok1 || !ok2 || !ok3 || op.operator != "``" {
+			newStream = append(newStream, tok)
+			continue
+		}
+
+		newStream = slices.Delete(newStream, len(newStream)-2, len(newStream))
+		newStream = append(newStream, &NameToken{content: name1.content + name2.content})
+	}
+	return newStream
+}
+
 func formatStream(stream TokenStream, lineWidth int) string {
-	lines := []Line{{tokens: stream, indent: 0, breakRangeStart: 0, breakRangeEnd: len(stream)}}
+	lines := []Line{{tokens: concatTokens(stream), indent: 0, breakRangeStart: 0, breakRangeEnd: len(stream)}}
 
 	allFit := false
 	changed := true

@@ -73,6 +73,12 @@ func suffix(prop Provable, suffix string) {
 	})
 }
 
+func subs(prop Provable, ident string, stream TokenStream) {
+	prop.walkProps(func(prop *Property) {
+		prop.subs(ident, stream)
+	})
+}
+
 func condition(prop Provable, cond TokenStream) {
 	prop.walkProps(func(prop *Property) {
 		prop.condition(cond)
@@ -146,6 +152,13 @@ func (prop *Property) suffix(suffix string) {
 		prop.name = suffix
 	} else {
 		prop.name = prop.name + "_" + suffix
+	}
+}
+
+func (prop *Property) subs(name string, subs TokenStream) {
+	prop.postCondition = subsStream(prop.postCondition, name, subs)
+	for i, pre := range prop.preConditions {
+		prop.preConditions[i] = subsStream(pre, name, subs)
 	}
 }
 
@@ -399,6 +412,22 @@ func (cmd *BlockProofCommand) genProperty(scope *Scope) Provable {
 		prefix(prop, cmd.label)
 	}
 	return prop
+}
+
+func (cmd *EachProofCommand) genProperty(scope *Scope) Provable {
+	group := NewProvableGroup()
+	for _, sub := range cmd.subs {
+		prop := cmd.seq.genProperty(scope)
+		subs(prop, cmd.ident, sub.getStream(scope))
+		if sub.label != "" {
+			prefix(prop, sub.label)
+		}
+		group.append(prop)
+	}
+	if cmd.label != "" {
+		prefix(&group, cmd.label)
+	}
+	return &group
 }
 
 func (cmd *HaveProofCommand) genProperty(scope *Scope) Provable {

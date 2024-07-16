@@ -29,6 +29,13 @@ type ProofCommand interface {
 	GenProperty
 }
 
+type EachProofCommand struct {
+	label string
+	ident string
+	subs  []VerbatimOrState
+	seq   SequencedProofSteps
+}
+
 type InStatesSubProofCommand struct {
 	label  string
 	states []VerbatimOrState
@@ -292,6 +299,17 @@ func blockToProofCommand(block Block, scope *LocalScope) ProofCommand {
 	case "block":
 		return &BlockProofCommand{
 			label: block.first.label,
+			seq:   blocksToSequenceProof(block.body),
+		}
+	case "each":
+		subs := []VerbatimOrState{}
+		for _, arg := range block.first.inlineArgs[1:] {
+			subs = append(subs, arg.toVerbatimOrState())
+		}
+		return &EachProofCommand{
+			label: block.first.label,
+			ident: block.first.wordArg(0),
+			subs:  subs,
 			seq:   blocksToSequenceProof(block.body),
 		}
 	case "in":
