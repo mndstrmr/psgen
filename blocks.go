@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 type CommandArg interface {
@@ -121,13 +122,22 @@ func (cmd *Command) stepWordArray() []string {
 
 func (cmd *Command) fixArgs(n int) {
 	if len(cmd.inlineArgs) != n {
-		panic(fmt.Errorf("expecting %d arguments to %s, found %d", n, cmd.operator, len(cmd.inlineArgs)))
+		s := ""
+		for _, arg := range cmd.inlineArgs {
+			s += "- " + arg.toString() + "\n"
+		}
+		panic(fmt.Errorf("expecting %d arguments to %s, found %d:\n%s", n, cmd.operator, len(cmd.inlineArgs), s))
 	}
 }
 
 func parseLabel(str string) (string, string) {
 	labelRest := strings.SplitN(str, ":", 2)
-	if len(labelRest) > 1 && !strings.Contains(labelRest[0], " ") {
+	if len(labelRest) > 1 {
+		for _, l := range labelRest[0] {
+			if !unicode.IsLetter(l) && !unicode.IsDigit(l) && l != '_' {
+				return "", str
+			}
+		}
 		return labelRest[0], strings.Trim(labelRest[1], " \t")
 	} else {
 		return "", str
