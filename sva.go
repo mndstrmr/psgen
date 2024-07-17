@@ -91,14 +91,7 @@ func (op *OperatorToken) breakMode() BreakMode {
 }
 
 func (op *OperatorToken) toString() string {
-	switch op.operator {
-	case "&":
-		return "&&"
-	case "|":
-		return "||"
-	default:
-		return op.operator
-	}
+	return op.operator
 }
 
 func (op *OperatorToken) subs(ident string, new []Token) []Token {
