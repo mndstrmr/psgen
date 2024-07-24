@@ -1,6 +1,12 @@
 # PSGen
 PSGen is a theorem proving type language which generates SystemVerilog and TCL. It dramatically simplifies case splitting, inductive proofs and similar strategies often found in formal verification.
 
+## Build instructions
+Please install Go version 1.22 or above using [these instructions](https://go.dev/doc/install). Then you can build PSGen from source:
+```sh
+go build
+```
+
 ## `have`
 Directly produces a SystemVerilog assertion of the same content, potentially with additional preconditions based on scope conditions (see `cond` and `on`).
 ```
