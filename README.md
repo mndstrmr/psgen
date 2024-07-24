@@ -66,7 +66,7 @@ lemma block_example
 Will produce two assertions: `p |-> q` and `r`.
 
 ## Lemmas
-One lemma can be imported into another via the `lemma` command. Lemmas cnanot be helped and do not any inherit conditions or any other scope.
+One lemma can be imported into another via the `lemma` command. Lemmas cannot be helped and do not inherit any conditions or any other scope.
 ```
 lemma abc
   have (p)
