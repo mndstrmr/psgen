@@ -100,7 +100,7 @@ Proof sequencing is a way to 'order' proofs, so that useful properties are prove
 lemma sequencing_example
   have (p)
   have (q)
-  \
+  /
   have (r)
 ```
 Will generate a property for each of `p`, `q`, `r`, and will configure the TCL with assume-guarantee type reasoning, where `q` will be proved using the assumptions of `p` and `r`, which will themselves each be individually verified, though neither will assume the other.
