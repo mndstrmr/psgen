@@ -103,7 +103,7 @@ lemma sequencing_example
   /
   have (r)
 ```
-Will generate a property for each of `p`, `q`, `r`, and will configure the TCL with assume-guarantee type reasoning, where `q` will be proved using the assumptions of `p` and `r`, which will themselves each be individually verified, though neither will assume the other.
+Will generate a property for each of `p`, `q`, `r`, and will configure the TCL with assume-guarantee type reasoning, where `r` will be proved using the assumptions of `p` and `q`, which will themselves each be individually verified, though neither will assume the other.
 
 ## Case Splitting
 `split` is a proof helper which case splits the given property into the cases given. `split` sequences the case proofs before the proof that is being helped. Any number of cases may be given. For example:
