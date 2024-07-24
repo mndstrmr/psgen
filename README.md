@@ -144,7 +144,7 @@ lemma bool_case_splitting_as_split_example
 ## Graph Induction
 Sometimes we want to prove that an automaton maintains an invariant through every step of its execution. We can do this by induction, where we consider every edge of a graph and verify the invariant specified is maintained. Regular induction is a special case of graph induction with one node which loops forever.
 
-What follows is an example to help verify that the BTYPE instructions in ibex set the correct PC, since this is difficult for k-induction to do alone.
+What follows is an example to help verify that the BTYPE instructions in Ibex set the correct PC, since this is difficult for k-induction to do alone.
 ```
 Induction:
 graph_induction +rev
