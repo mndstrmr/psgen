@@ -159,11 +159,11 @@ graph_induction +rev
     split_bool (`CR.branch_decision)
   node progress eq (instr_will_progress)
 ```
-- `graph_induction` starts a nested scope and `cond` can be used in the same way it is otherwise
+- `graph_induction` starts a nested scope and `cond` can be used in the same way it is otherwise.
 - `inv <name> <condition>` specifies an invariant in the graph. There may be several invariants, each node will have one invariant (FIXME: several?)
 - `entry <condition> -> <nodes>` optionally specifies a set of entry points of the graph, with the given entry condition. When present checks are added to ensure that when the entry condition is satisfied one of the entry nodes are selected and that nodes invariant is true.
 - `node <name> <invariant> <condition> => <nodes>` defines a node with the given name, for which the given invariant must be true. The node is recognised by the condition being true. The nodes given are the set of allowable next states in the next cycle. Note that nodes can have proof helpers (e.g. `split` or `split_bool`). These helpers are applied to assertion 4 in the below.
-- `+rev` indicates that we should also that the only reach to reach any node is to walk through the graph
+- `+rev` indicates that the only reach to reach any node is to walk through the graph.
 
 Assertions are emit to check that:
 1. If an entry is given, when the entry condition is true the condition of one of the entry nodes is true.
