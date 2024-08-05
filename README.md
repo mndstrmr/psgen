@@ -1,6 +1,12 @@
 # PSGen
 PSGen is a theorem proving type language which generates SystemVerilog and TCL. It dramatically simplifies case splitting, inductive proofs and similar strategies often found in formal verification.
 
+## Build instructions
+Please install Go version 1.22 or above using [these instructions](https://go.dev/doc/install). Then you can build PSGen from source:
+```sh
+go build
+```
+
 ## `have`
 Directly produces a SystemVerilog assertion of the same content, potentially with additional preconditions based on scope conditions (see `cond` and `on`).
 ```
@@ -66,7 +72,7 @@ lemma block_example
 Will produce two assertions: `p |-> q` and `r`.
 
 ## Lemmas
-One lemma can be imported into another via the `lemma` command. Lemmas cnanot be helped and do not any inherit conditions or any other scope.
+One lemma can be imported into another via the `lemma` command. Lemmas cannot be helped and do not inherit any conditions or any other scope.
 ```
 lemma abc
   have (p)
@@ -100,10 +106,10 @@ Proof sequencing is a way to 'order' proofs, so that useful properties are prove
 lemma sequencing_example
   have (p)
   have (q)
-  \
+  /
   have (r)
 ```
-Will generate a property for each of `p`, `q`, `r`, and will configure the TCL with assume-guarantee type reasoning, where `q` will be proved using the assumptions of `p` and `r`, which will themselves each be individually verified, though neither will assume the other.
+Will generate a property for each of `p`, `q`, `r`, and will configure the TCL with assume-guarantee type reasoning, where `r` will be proved using the assumptions of `p` and `q`, which will themselves each be individually verified, though neither will assume the other.
 
 ## Case Splitting
 `split` is a proof helper which case splits the given property into the cases given. `split` sequences the case proofs before the proof that is being helped. Any number of cases may be given. For example:
@@ -144,7 +150,7 @@ lemma bool_case_splitting_as_split_example
 ## Graph Induction
 Sometimes we want to prove that an automaton maintains an invariant through every step of its execution. We can do this by induction, where we consider every edge of a graph and verify the invariant specified is maintained. Regular induction is a special case of graph induction with one node which loops forever.
 
-What follows is an example to help verify that the BTYPE instructions in ibex set the correct PC, since this is difficult for k-induction to do alone.
+What follows is an example to help verify that the BTYPE instructions in Ibex set the correct PC, since this is difficult for k-induction to do alone.
 ```
 Induction:
 graph_induction +rev
@@ -159,11 +165,11 @@ graph_induction +rev
     split_bool (`CR.branch_decision)
   node progress eq (instr_will_progress)
 ```
-- `graph_induction` starts a nested scope and `cond` can be used in the same way it is otherwise
+- `graph_induction` starts a nested scope and `cond` can be used in the same way it is otherwise.
 - `inv <name> <condition>` specifies an invariant in the graph. There may be several invariants, each node will have one invariant (FIXME: several?)
 - `entry <condition> -> <nodes>` optionally specifies a set of entry points of the graph, with the given entry condition. When present checks are added to ensure that when the entry condition is satisfied one of the entry nodes are selected and that nodes invariant is true.
 - `node <name> <invariant> <condition> => <nodes>` defines a node with the given name, for which the given invariant must be true. The node is recognised by the condition being true. The nodes given are the set of allowable next states in the next cycle. Note that nodes can have proof helpers (e.g. `split` or `split_bool`). These helpers are applied to assertion 4 in the below.
-- `+rev` indicates that we should also that the only reach to reach any node is to walk through the graph
+- `+rev` indicates that the only reach to reach any node is to walk through the graph.
 
 Assertions are emit to check that:
 1. If an entry is given, when the entry condition is true the condition of one of the entry nodes is true.
