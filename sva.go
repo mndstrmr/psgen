@@ -658,7 +658,7 @@ func (line *Line) longestParens() int {
 
 func concatTokens(stream TokenStream) TokenStream {
 	newStream := TokenStream{}
-	for i, tok := range stream {
+	for _, tok := range stream {
 		if brack, ok := tok.(*BracketedToken); ok {
 			newStream = append(newStream, &BracketedToken{
 				openBracket:  brack.openBracket,
@@ -668,7 +668,7 @@ func concatTokens(stream TokenStream) TokenStream {
 			continue
 		}
 
-		if i < 2 {
+		if len(newStream) < 2 {
 			newStream = append(newStream, tok)
 			continue
 		}
