@@ -1,5 +1,5 @@
 {
-  inputs.nixpkgs.url = "nixpkgs/nixos-24.05";
+  inputs.nixpkgs.url = "nixpkgs/nixos-25.05";
   inputs.flake-utils.url = "github:numtide/flake-utils";
 
   inputs.gomod2nix = {
@@ -47,7 +47,6 @@
             mainProgram = "psgen";
             homepage = "https://github.com/mndstrmr/psgen";
             maintainers = [ ];
-            # license = ;
           };
         };
 
