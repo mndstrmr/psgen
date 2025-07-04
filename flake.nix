@@ -47,7 +47,6 @@
             mainProgram = "psgen";
             homepage = "https://github.com/mndstrmr/psgen";
             maintainers = [ ];
-            # license = ;
           };
         };
 
