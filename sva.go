@@ -737,7 +737,7 @@ func formatStream(stream TokenStream, lineWidth int) string {
 	return str
 }
 
-func (prop *Property) toSva(assume bool, lineWidth int) string {
+func (prop *Property) toSva(assume bool, clocking bool, lineWidth int) string {
 	unsplittableStart := prop.name + ": "
 	if assume {
 		unsplittableStart += "assume"
@@ -747,6 +747,10 @@ func (prop *Property) toSva(assume bool, lineWidth int) string {
 	unsplittableStart += " property "
 
 	inner := TokenStream{}
+	if clocking {
+		inner = append(inner, &NameToken{content: "@(posedge clk_i) disable iff (~rst_ni) "})
+	}
+
 	if prop.wait != 0 {
 		inner = append(inner, &OperatorToken{
 			operator: "##" + strconv.Itoa(prop.wait),
@@ -779,7 +783,7 @@ func (wire *Wiring) toSva(lineWidth int) string {
 	return formatStream(stream, lineWidth)
 }
 
-func (seq *FlatProofSequence) toSva(slice int, lineWidth int) string {
+func (seq *FlatProofSequence) toSva(slice int, clocking bool, lineWidth int) string {
 	sva := ""
 
 	for _, wire := range seq.wires {
@@ -792,7 +796,7 @@ func (seq *FlatProofSequence) toSva(slice int, lineWidth int) string {
 		}
 		sva += "`ifndef REMOVE_SLICE_" + strconv.Itoa(i) + "\n"
 		for _, prop := range step {
-			sva += prop.toSva(slice != -1 && i != slice, lineWidth) + "\n"
+			sva += prop.toSva(slice != -1 && i != slice, clocking, lineWidth) + "\n"
 		}
 		sva += "`endif\n\n"
 	}
