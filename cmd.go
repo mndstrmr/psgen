@@ -14,6 +14,7 @@ var tclOut string
 var slice int
 var task bool
 var clocking bool
+var stepPrefix bool
 
 func main() {
 	paths = []string{}
@@ -27,6 +28,7 @@ func main() {
 	flag.StringVar(&tclOut, "tcl-out", "", "path to write generated TCL to, or empty to ignore")
 	flag.BoolVar(&task, "task", false, "instead of using proof_structure, generate a set of TCL tasks of assumptions and assertions")
 	flag.BoolVar(&clocking, "clocking", false, "produce @(posedge clk_i) disable iff (~rst_ni) in front of each property")
+	flag.BoolVar(&stepPrefix, "step-prefix", false, "Prefix all properties with Step[step number]_")
 	flag.Parse()
 
 	if len(paths) == 0 {
@@ -76,7 +78,7 @@ func main() {
 	prop.flatten(&seq, 0)
 	seq.checkNames()
 
-	sva := seq.toSva(slice, clocking, 100)
+	sva := seq.toSva(slice, clocking, stepPrefix, 100)
 	os.WriteFile(svOut, []byte(sva), 0664)
 
 	if tclOut != "" {
