@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"strconv"
 )
 
 var paths []string
@@ -15,6 +16,7 @@ var slice int
 var task bool
 var clocking bool
 var stepPrefix bool
+var listOut string
 
 func main() {
 	paths = []string{}
@@ -24,8 +26,9 @@ func main() {
 	})
 	flag.StringVar(&rootLemma, "root", "", "name of root lemma")
 	flag.IntVar(&slice, "slice", -1, "select a slice to assert, those leading up to it will be assumed and those after ignored")
-	flag.StringVar(&svOut, "sv-out", "out.sv", "path to write generated SystemVerilog to")
+	flag.StringVar(&svOut, "sv-out", "", "path to write generated SystemVerilog to, or empty to ignore")
 	flag.StringVar(&tclOut, "tcl-out", "", "path to write generated TCL to, or empty to ignore")
+	flag.StringVar(&listOut, "list", "", "path to write property list to, or empty to ignore")
 	flag.BoolVar(&task, "task", false, "instead of using proof_structure, generate a set of TCL tasks of assumptions and assertions")
 	flag.BoolVar(&clocking, "clocking", false, "produce @(posedge clk_i) disable iff (~rst_ni) in front of each property")
 	flag.BoolVar(&stepPrefix, "step-prefix", false, "Prefix all properties with Step[step number]_")
@@ -78,8 +81,10 @@ func main() {
 	prop.flatten(&seq, 0)
 	seq.checkNames()
 
-	sva := seq.toSva(slice, clocking, stepPrefix, 100)
-	os.WriteFile(svOut, []byte(sva), 0664)
+	if svOut != "" {
+		sva := seq.toSva(slice, clocking, stepPrefix, 100)
+		os.WriteFile(svOut, []byte(sva), 0664)
+	}
 
 	if tclOut != "" {
 		var tcl string
@@ -89,5 +94,16 @@ func main() {
 			tcl = seq.toProofStructure()
 		}
 		os.WriteFile(tclOut, []byte(tcl), 0664)
+	}
+
+	if listOut != "" {
+		var list = ""
+		for s, step := range seq.props {
+			list += strconv.Itoa(s) + "\n"
+			for _, prop := range step {
+				list += "  " + prop.name + "\n"
+			}
+		}
+		os.WriteFile(listOut, []byte(list), 0664)
 	}
 }
